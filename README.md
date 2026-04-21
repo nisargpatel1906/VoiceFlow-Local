@@ -56,12 +56,17 @@ VoicesFlow Local is built with a robust, multi-threaded architecture:
    - Install all required dependencies from `requirements.txt`.
    - Download the default Whisper model to the `models/` directory.
 
-### Running the App
+## Step-by-Step Usage Guide
 
-Double-click `start.bat` to launch the application.
-- You will see a microphone icon in your system tray.
-- Hold **`Ctrl + Space`** to record.
-- Release to transcribe and inject the text.
+Once installed, VoiceFlow Local is designed to be invisible and efficient. Follow these steps to start dictating:
+
+1. **Launch**: Double-click `start.bat`. You will see a microphone icon appear in your Windows System Tray (bottom-right corner).
+2. **Setup Focus**: Click your mouse into any application where you want to type (e.g., Notepad, WhatsApp, VS Code).
+3. **Record**: Press and hold the **`Ctrl + Space`** hotkey. 
+   - The tray icon will turn **red**, and a real-time waveform will show your audio levels.
+4. **Speak**: Speak naturally. The local AI is optimized for conversational speech and will automatically handle punctuation.
+5. **Finalize**: Release the hotkey. The app will briefly turn **yellow** while processing.
+6. **Result**: Your transcribed text will be automatically typed at your cursor position.
 
 ---
 
