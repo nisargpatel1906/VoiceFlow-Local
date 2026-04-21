@@ -1,0 +1,26 @@
+# VoiceFlow Local - Voice Dictation App Dependencies
+# Windows-compatible Python packages for speech-to-text
+
+# Speech recognition
+faster-whisper==1.0.3      # Fast Whisper ASR model
+requests>=2.31.0           # Required by faster-whisper 1.0.3 utilities
+
+# Audio capture
+pyaudio==0.2.14            # Microphone input (PortAudio bindings)
+
+# Hotkey detection
+keyboard==0.13.5           # Global hotkey listener
+
+# Clipboard operations
+pyperclip==1.9.0           # Copy/paste transcribed text
+
+# GUI automation
+pyautogui==0.9.54          # Simulate keyboard input for pasting
+
+# System tray UI
+PyQt6==6.7.0               # System tray icon and menus
+
+# Audio processing
+numpy==1.26.4              # Audio array operations
+torch==2.3.0               # PyTorch for faster-whisper
+torchaudio==2.3.0          # Audio utilities for PyTorch

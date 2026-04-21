@@ -1,0 +1,318 @@
+"""
+VoiceFlow Local - Windows dictation app.
+
+PyQt6 tray popup UI + global Ctrl+Space push-to-talk dictation.
+"""
+
+from __future__ import annotations
+
+import argparse
+import importlib
+import json
+import logging
+import os
+import sys
+import threading
+from datetime import datetime
+from typing import Dict, List
+
+from PyQt6.QtCore import QObject, QTimer, pyqtSignal, pyqtSlot
+from PyQt6.QtWidgets import QApplication
+
+import config
+from cleaner import TextCleaner
+from dictation_threads import AudioCaptureThread, StreamingWhisperThread
+from gui.settings_window import SettingsWindow
+from hotkey import HotkeyManager
+from injector import TextInjector
+from voiceflow_ui import TrayController, VoiceFlowWindow, copy_to_clipboard, make_history_entry
+
+
+def setup_logging(debug_mode: bool = False):
+    log_level = logging.DEBUG if debug_mode else logging.INFO
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        handlers=[
+            logging.FileHandler("voiceflow.log", encoding="utf-8"),
+            logging.StreamHandler() if debug_mode else logging.NullHandler(),
+        ],
+    )
+    return logging.getLogger(__name__)
+
+
+class JsonlHistory:
+    def __init__(self, path: str, limit: int = 50):
+        self.path = path
+        self.limit = limit
+        self.entries: List[Dict] = []
+        self.load()
+
+    def load(self):
+        self.entries = []
+        if not os.path.exists(self.path):
+            return
+
+        with open(self.path, "r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                entry.setdefault("chars", len(entry.get("text", "")))
+                entry.setdefault("duration_sec", 0)
+                entry["time_label"] = self._time_label(entry)
+                self.entries.append(entry)
+
+        self.entries = self.entries[-self.limit :]
+
+    def add(self, entry: Dict):
+        self.entries.append(entry)
+        self.entries = self.entries[-self.limit :]
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        with open(self.path, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps({k: v for k, v in entry.items() if k != "time_label"}, ensure_ascii=False) + "\n")
+
+    def clear(self):
+        self.entries = []
+        with open(self.path, "w", encoding="utf-8"):
+            pass
+
+    def _time_label(self, entry: Dict) -> str:
+        raw = f"{entry.get('date', '')} {entry.get('time', '')}".strip()
+        try:
+            created = datetime.strptime(raw, "%Y-%m-%d %H:%M:%S")
+            return created.strftime("Today, %I:%M %p").replace(" 0", " ")
+        except ValueError:
+            return entry.get("time", "")
+
+
+class VoiceFlowApp(QObject):
+    hotkey_pressed = pyqtSignal()
+    hotkey_released = pyqtSignal()
+
+    def __init__(self, debug_mode: bool = False):
+        super().__init__()
+        self.logger = setup_logging(debug_mode)
+
+        self.qt_app = QApplication.instance() or QApplication(sys.argv)
+        self.qt_app.setQuitOnLastWindowClosed(False)
+
+        self.window = VoiceFlowWindow()
+        self.settings_window = None
+        self.tray = TrayController(self.window, self.quit)
+        self.cleaner = TextCleaner()
+        self.injector = TextInjector()
+        self.history = JsonlHistory(config.LOG_FILE, config.HISTORY_LIMIT)
+
+        self.window.set_history(self.history.entries)
+        self.window.copy_requested.connect(self._copy_text)
+        self.window.clear_history_requested.connect(self._clear_history)
+        self.window.settings_requested.connect(self._show_settings)
+        self.window.history_selected.connect(self._load_history_entry)
+
+        self.hotkey_pressed.connect(self._start_recording)
+        self.hotkey_released.connect(self._stop_recording)
+        self.hotkey = HotkeyManager(
+            on_press_callback=lambda: self.hotkey_pressed.emit(),
+            on_release_callback=lambda: self.hotkey_released.emit(),
+        )
+
+        self.audio_thread: AudioCaptureThread | None = None
+        self.transcriber_thread: StreamingWhisperThread | None = None
+        self.is_recording = False
+        self.is_processing = False
+
+    def start(self):
+        self.logger.info("Starting VoiceFlow Local UI")
+        self.hotkey.start()
+        self.window.set_state("idle")
+        self.tray.set_state("idle")
+        self.tray.notify(f"Ready. Hold {config.HOTKEY} to dictate")
+        return self.qt_app.exec()
+
+    @pyqtSlot()
+    def _start_recording(self):
+        if self.is_recording or self.is_processing:
+            return
+
+        self.logger.info("Hotkey pressed")
+        self.is_recording = True
+        self.is_processing = False
+        self.window.update_live_text("")
+        self.window.set_hotkey_active(True)
+        self.window.set_state("recording")
+        self.window.show_near_tray()
+        self.tray.set_state("recording")
+
+        self.audio_thread = AudioCaptureThread()
+        self.audio_thread.level_changed.connect(self.window.update_level)
+        self.audio_thread.audio_finished.connect(self._submit_final_audio)
+        self.audio_thread.error.connect(self._on_worker_error)
+        audio_thread = self.audio_thread
+        self.audio_thread.finished.connect(audio_thread.deleteLater)
+        self.audio_thread.finished.connect(lambda: self._clear_audio_thread(audio_thread))
+        self.audio_thread.start()
+
+    @pyqtSlot()
+    def _stop_recording(self):
+        if not self.is_recording:
+            return
+
+        self.logger.info("Hotkey released")
+        self.is_recording = False
+        self.is_processing = True
+        self.window.set_hotkey_active(False)
+        self.window.set_state("processing")
+        self.tray.set_state("processing")
+
+        if self.audio_thread and self.audio_thread.isRunning():
+            self.audio_thread.stop()
+
+    @pyqtSlot(bytes, float)
+    def _submit_partial_audio(self, audio_bytes: bytes, duration_sec: float):
+        # Live Whisper snapshots were disabled because faster-whisper native
+        # inference could overlap the release/finalize path and crash on some
+        # Windows GPU setups. Final transcription still runs off the UI thread.
+        return
+
+    @pyqtSlot(bytes, float)
+    def _submit_final_audio(self, audio_bytes: bytes, duration_sec: float):
+        if not audio_bytes:
+            self._on_worker_error("No audio captured")
+            self._reset_idle()
+            return
+
+        self.transcriber_thread = StreamingWhisperThread()
+        self.transcriber_thread.partial_ready.connect(self._on_partial_text)
+        self.transcriber_thread.final_ready.connect(self._on_final_text)
+        self.transcriber_thread.error.connect(self._on_worker_error)
+        transcriber_thread = self.transcriber_thread
+        self.transcriber_thread.finished.connect(transcriber_thread.deleteLater)
+        self.transcriber_thread.finished.connect(lambda: self._clear_transcriber_thread(transcriber_thread))
+        self.transcriber_thread.start()
+        self.transcriber_thread.submit_audio(audio_bytes, duration_sec, final=True)
+
+    @pyqtSlot(str)
+    def _on_partial_text(self, text: str):
+        if self.is_recording:
+            self.window.update_live_text(text)
+
+    @pyqtSlot(str, float)
+    def _on_final_text(self, raw_text: str, duration_sec: float):
+        self.is_processing = False
+
+        clean_text = self.cleaner.clean(raw_text)
+        if not clean_text:
+            self._on_worker_error("Transcription returned empty text")
+            self._reset_idle()
+            return
+
+        self.window.update_live_text(clean_text)
+
+        if clean_text != "DELETE_LAST":
+            entry = make_history_entry(clean_text, duration_sec)
+            self.history.add(entry)
+            self.window.add_history_entry(entry)
+            self._inject_text_async(clean_text)
+            self.tray.notify(clean_text[:60] + ("..." if len(clean_text) > 60 else ""))
+
+        self._reset_idle()
+
+    @pyqtSlot(str)
+    def _on_worker_error(self, message: str):
+        self.logger.error(message)
+        self.is_recording = False
+        self.is_processing = False
+        self.window.set_hotkey_active(False)
+        self.window.set_state("idle")
+        self.tray.set_state("error")
+        self.tray.notify(message[:80], duration=6000)
+        QTimer.singleShot(1800, lambda: self.tray.set_state("idle"))
+
+    def _reset_idle(self):
+        self.is_recording = False
+        self.is_processing = False
+        self.window.set_hotkey_active(False)
+        self.window.set_state("idle")
+        self.tray.set_state("idle")
+
+    def _clear_audio_thread(self, thread):
+        if self.audio_thread is thread:
+            self.audio_thread = None
+
+    def _clear_transcriber_thread(self, thread):
+        if self.transcriber_thread is thread:
+            self.transcriber_thread = None
+
+    def _inject_text_async(self, text: str):
+        # Keep focus on the previous app and keep Qt responsive while pyautogui pastes.
+        self.window.hide()
+        thread = threading.Thread(target=self.injector.inject_at_cursor, args=(text,), daemon=True)
+        thread.start()
+
+    @pyqtSlot(str)
+    def _copy_text(self, text: str):
+        copy_to_clipboard(text)
+        self.tray.notify("Copied")
+
+    @pyqtSlot()
+    def _clear_history(self):
+        self.history.clear()
+        self.window.set_history([])
+        self.window.update_live_text("")
+        self.tray.notify("History cleared")
+
+    @pyqtSlot()
+    def _show_settings(self):
+        if self.settings_window is None:
+            self.settings_window = SettingsWindow()
+            self.settings_window.settings_changed.connect(self._reload_settings)
+            self.settings_window.window_hidden.connect(self.hotkey.resume_hotkey)
+
+        self.hotkey.pause_hotkey()
+        self.settings_window.show()
+        self.settings_window.raise_()
+        self.settings_window.activateWindow()
+
+    @pyqtSlot()
+    def _reload_settings(self):
+        importlib.reload(config)
+        self.cleaner = TextCleaner()
+        self.history.path = config.LOG_FILE
+        self.history.limit = config.HISTORY_LIMIT
+        self.history.load()
+        self.window.set_history(self.history.entries)
+        if self.hotkey.hotkey != config.HOTKEY:
+            self.hotkey.update_hotkey(config.HOTKEY)
+        self.tray.notify("Settings saved")
+
+    @pyqtSlot(dict)
+    def _load_history_entry(self, entry: Dict):
+        self.window.update_live_text(entry.get("text", ""))
+
+    def quit(self):
+        self.hotkey.stop()
+        if self.audio_thread and self.audio_thread.isRunning():
+            self.audio_thread.stop()
+        if self.transcriber_thread and self.transcriber_thread.isRunning():
+            self.transcriber_thread.stop()
+        self.tray.tray_icon.hide()
+        if self.settings_window:
+            self.settings_window.hide()
+        self.qt_app.quit()
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="VoiceFlow Local")
+    parser.add_argument("--debug", action="store_true", help="Enable console debug logging")
+    args = parser.parse_args()
+
+    app = VoiceFlowApp(debug_mode=args.debug)
+    try:
+        sys.exit(app.start())
+    except KeyboardInterrupt:
+        app.quit()
