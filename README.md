@@ -1,4 +1,8 @@
-# 🎙️ VoiceFlow Local
+<p align="center">
+  <img src="logo.png" width="150" alt="VoiceFlow Local Logo">
+</p>
+
+# VoiceFlow Local
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
@@ -8,19 +12,19 @@
 
 ---
 
-## ✨ Features
+## Features
 
-- 🚀 **Lightning Fast**: Uses `faster-whisper` for optimized CTranslate2 inference.
-- 🔒 **Privacy First**: No cloud APIs. Your voice never leaves your machine.
-- ⌨️ **Push-to-Talk**: Global hotkey (`Ctrl + Space` by default) for seamless dictation.
-- 💉 **Direct Injection**: Transcribed text is automatically typed at your cursor or copied to the clipboard.
-- 🎛️ **Customizable**: Adjustable model sizes (tiny to large-v3), filler word removal, and more.
-- 🕒 **History**: Keep track of your previous dictations with a built-in session history.
-- 🎨 **Sleek UI**: Minimalist system tray integration with real-time audio level visualization.
+- **Lightning Fast**: Uses `faster-whisper` for optimized CTranslate2 inference.
+- **Privacy First**: No cloud APIs. Your voice never leaves your machine.
+- **Push-to-Talk**: Global hotkey (`Ctrl + Space` by default) for seamless dictation.
+- **Direct Injection**: Transcribed text is automatically typed at your cursor or copied to the clipboard.
+- **Customizable**: Adjustable model sizes (tiny to large-v3), filler word removal, and more.
+- **History**: Keep track of your previous dictations with a built-in session history.
+- **Sleek UI**: Minimalist system tray integration with real-time audio level visualization.
 
 ---
 
-## 🛠️ Architecture
+## Architecture
 
 VoicesFlow Local is built with a robust, multi-threaded architecture:
 - **PyQt6**: Manages the system tray, UI windows, and event loop.
@@ -30,7 +34,7 @@ VoicesFlow Local is built with a robust, multi-threaded architecture:
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 
@@ -61,7 +65,7 @@ Double-click `start.bat` to launch the application.
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
 Settings can be managed via the UI or by editing `config.py`:
 
@@ -75,7 +79,7 @@ Settings can be managed via the UI or by editing `config.py`:
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome! If you have suggestions for new features or find bugs, please open an issue or submit a pull request.
 
@@ -87,15 +91,15 @@ Contributions are welcome! If you have suggestions for new features or find bugs
 
 ---
 
-## 📜 License
+## License
 
 Distributed under the MIT License. See `LICENSE` for more information.
 
 ---
 
-## 👤 Author
+## Author
 
 **Nisarg Patel**
 - GitHub: [@nisargpatel1906](https://github.com/nisargpatel1906)
 
-*Made with ❤️ for faster, easier dictation.*
+*Made with support for faster, easier dictation.*
