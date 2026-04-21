@@ -1,8 +1,8 @@
 """
 VoiceFlow Local - suppressing global hotkey listener.
 
-Ctrl+Space is intercepted globally while VoiceFlow is running so the foreground
-app does not receive it. Other keys pass through normally.
+The configured hotkey is intercepted globally while VoiceFlow is running so the
+foreground app does not receive it. Other keys pass through normally.
 """
 
 import threading
@@ -17,9 +17,10 @@ class HotkeyManager:
     """
     Global push-to-talk hotkey manager.
 
-    Uses keyboard.add_hotkey(..., suppress=True) so Ctrl+Space is blocked from
-    every other app while VoiceFlow is active. Release is detected by polling
-    the current key state, avoiding duplicate suppressed registrations.
+    Uses keyboard.add_hotkey(..., suppress=True) so the configured hotkey is
+    blocked from every other app while VoiceFlow is active. Release is detected
+    by polling the current key state, avoiding duplicate suppressed
+    registrations.
     """
 
     def __init__(self, on_press_callback=None, on_release_callback=None):
@@ -110,7 +111,7 @@ class HotkeyManager:
                 time.sleep(0.1)
         except Exception as exc:
             print(f"[ERROR] Failed to register suppressing hotkey: {exc}")
-            print("[INFO] Run start.bat as Administrator if Ctrl+Space is not blocked on Windows 11.")
+            print(f"[INFO] Run start.bat as Administrator if {self.hotkey} is not blocked on Windows 11.")
         finally:
             self._unregister_hotkey()
             self._is_pressed = False
@@ -148,7 +149,7 @@ class HotkeyManager:
         self._is_listening = False
         self._is_pressed = False
         self._is_paused = False
-        print("[OK] Hotkey listener stopped and Ctrl+Space restored")
+        print(f"[OK] Hotkey listener stopped and {self.hotkey} restored")
 
     def pause_hotkey(self):
         """Temporarily disable callbacks while keeping normal typing possible."""

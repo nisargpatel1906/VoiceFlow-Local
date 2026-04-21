@@ -1,7 +1,7 @@
 """
 VoiceFlow Local - Settings window.
 
-Frameless PyQt6 settings panel that reads/writes config.py and emits
+Native PyQt6 settings window that reads/writes config.py and emits
 settings_changed after a successful save.
 """
 
@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from PyQt6.QtCore import QPoint, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QCursor, QFont, QKeyEvent, QPainter, QPen
+from PyQt6.QtGui import QColor, QCursor, QFont, QIcon, QKeyEvent, QPainter, QPen
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -36,18 +36,20 @@ from PyQt6.QtWidgets import (
 import config
 
 
-BG = "#0f0f13"
-SURFACE = "#16161e"
-BORDER = "#2a2a3a"
-TEXT = "#ECEFF1"
-MUTED = "#8c93a1"
-ACCENT = "#4A90D9"
-PRIMARY = "#1565C0"
+BG = "#f7f5ef"
+SURFACE = "#ffffff"
+SURFACE_ALT = "#f0ede5"
+BORDER = "#e8e2d8"
+TEXT = "#191919"
+MUTED = "#65615a"
+ACCENT = "#ffae43"
+PRIMARY = "#191919"
+BLUE = "#1565C0"
 SUCCESS = "#2E7D32"
 
 
 DEFAULT_CONFIG: Dict[str, Any] = {
-    "HOTKEY": "ctrl+space",
+    "HOTKEY": "ctrl+windows",
     "TOGGLE_MODE": False,
     "MODEL_SIZE": "medium",
     "DEVICE": "cuda",
@@ -90,6 +92,13 @@ def ui_font(size: int, weight: QFont.Weight = QFont.Weight.Normal) -> QFont:
     font = QFont("Segoe UI", size)
     font.setWeight(weight)
     return font
+
+
+def app_logo_icon() -> QIcon:
+    logo_path = Path(__file__).resolve().parents[1] / "logo.png"
+    if logo_path.exists():
+        return QIcon(str(logo_path))
+    return QIcon()
 
 
 def cfg(name: str) -> Any:
@@ -154,19 +163,19 @@ class Toggle(QCheckBox):
         super().__init__()
         self.setChecked(checked)
         self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        self.setFixedSize(44, 24)
+        self.setFixedSize(30, 18)
         self.setStyleSheet(
             f"""
             QCheckBox::indicator {{
                 width: 44px;
                 height: 24px;
                 border-radius: 12px;
-                background: #20202a;
-                border: 1px solid #545463;
+                background: #dfd8cd;
+                border: 1px solid #cfc5b8;
             }}
             QCheckBox::indicator:checked {{
-                background: {PRIMARY};
-                border: 1px solid {ACCENT};
+                background: {BLUE};
+                border: 1px solid {BLUE};
             }}
             """
         )
@@ -174,14 +183,14 @@ class Toggle(QCheckBox):
     def paintEvent(self, event):  # noqa: N802 - Qt override
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        track = QColor(PRIMARY if self.isChecked() else "#20202a")
+        track = QColor(BLUE if self.isChecked() else "#dfd8cd")
         painter.setBrush(track)
-        painter.setPen(QPen(QColor(ACCENT if self.isChecked() else "#545463"), 1))
-        painter.drawRoundedRect(0, 0, 44, 24, 12, 12)
-        knob_x = 23 if self.isChecked() else 3
+        painter.setPen(QPen(QColor(BLUE if self.isChecked() else "#cfc5b8"), 1))
+        painter.drawRoundedRect(0, 0, 30, 18, 9, 9)
+        knob_x = 15 if self.isChecked() else 3
         painter.setBrush(QColor("#ffffff"))
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(knob_x, 3, 18, 18)
+        painter.drawEllipse(knob_x, 3, 12, 12)
 
 
 class HotkeyRecorder(QPushButton):
@@ -199,8 +208,9 @@ class HotkeyRecorder(QPushButton):
 
     def _style(self, active: bool):
         border = ACCENT if active else BORDER
+        background = "#fff3df" if active else "#fbfaf7"
         self.setStyleSheet(
-            f"QPushButton {{ background: {BG}; color: {ACCENT}; border: 1px solid {border}; border-radius: 7px; padding: 7px 12px; font-weight: 700; }}"
+            f"QPushButton {{ background: {background}; color: #6c4a1d; border: 1px solid {border}; border-radius: 6px; padding: 7px 11px; font-weight: 700; font-size: 10px; }}"
         )
 
     def _start_capture(self):
@@ -269,7 +279,7 @@ class Chip(QPushButton):
         self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.clicked.connect(lambda: self.removed.emit(self.word))
         self.setStyleSheet(
-            f"QPushButton {{ background: #202033; color: #aab2c0; border: 1px solid {BORDER}; border-radius: 5px; padding: 5px 8px; }}"
+            f"QPushButton {{ background: #fbfaf7; color: {MUTED}; border: 1px solid {BORDER}; border-radius: 5px; padding: 4px 8px; font-size: 9px; }}"
             f"QPushButton:hover {{ border-color: {ACCENT}; color: {TEXT}; }}"
         )
 
@@ -277,33 +287,33 @@ class Chip(QPushButton):
 class SectionCard(QFrame):
     def __init__(self, title: str):
         super().__init__()
-        self.setStyleSheet(f"QFrame {{ background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 10px; }}")
+        self.setStyleSheet(f"QFrame {{ background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 16px; }}")
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(14, 10, 14, 12)
-        self.layout.setSpacing(0)
+        self.layout.setContentsMargins(18, 16, 18, 16)
+        self.layout.setSpacing(10)
 
         label = QLabel(title)
-        label.setFont(ui_font(8, QFont.Weight.Bold))
-        label.setStyleSheet(f"color: {MUTED}; letter-spacing: 2px; border: none; background: transparent;")
+        label.setFont(ui_font(9, QFont.Weight.Bold))
+        label.setStyleSheet(f"color: #7b7770; letter-spacing: 1px; border: none; background: transparent;")
         self.layout.addWidget(label)
 
     def row(self, title: str, subtitle: str = "", control: Optional[QWidget] = None):
         wrap = QFrame()
-        wrap.setStyleSheet(f"QFrame {{ border: none; border-top: 1px solid {BORDER}; border-radius: 0; background: transparent; }}")
+        wrap.setStyleSheet("QFrame { border: none; border-radius: 0; background: transparent; }")
         row = QHBoxLayout(wrap)
-        row.setContentsMargins(0, 12, 0, 10)
-        row.setSpacing(12)
+        row.setContentsMargins(0, 8, 0, 8)
+        row.setSpacing(14)
 
         labels = QVBoxLayout()
         labels.setContentsMargins(0, 0, 0, 0)
         labels.setSpacing(3)
         title_label = QLabel(title)
-        title_label.setFont(ui_font(10, QFont.Weight.DemiBold))
+        title_label.setFont(ui_font(11, QFont.Weight.Bold))
         title_label.setStyleSheet(f"color: {TEXT}; border: none; background: transparent;")
         labels.addWidget(title_label)
         if subtitle:
             subtitle_label = QLabel(subtitle)
-            subtitle_label.setFont(ui_font(8))
+            subtitle_label.setFont(ui_font(9))
             subtitle_label.setStyleSheet(f"color: {MUTED}; border: none; background: transparent;")
             labels.addWidget(subtitle_label)
         row.addLayout(labels, 1)
@@ -316,12 +326,14 @@ class SectionCard(QFrame):
 class SettingsWindow(QWidget):
     settings_changed = pyqtSignal()
     window_hidden = pyqtSignal()
+    return_to_floating = pyqtSignal()
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        self.setFixedSize(480, 680)
+        self.setFixedSize(980, 720)
         self.setWindowTitle("VoiceFlow Local Settings")
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool | Qt.WindowType.WindowStaysOnTopHint)
+        self.setWindowIcon(app_logo_icon())
+        self.setWindowFlags(Qt.WindowType.Window)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
         self._drag_pos: Optional[QPoint] = None
         self.filler_words = list(cfg("FILLER_WORDS"))
@@ -335,42 +347,18 @@ class SettingsWindow(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        titlebar = QFrame()
-        titlebar.setObjectName("Titlebar")
-        titlebar.setFixedHeight(58)
-        title_layout = QHBoxLayout(titlebar)
-        title_layout.setContentsMargins(18, 0, 18, 0)
-        title_layout.setSpacing(10)
-
-        icon = QFrame()
-        icon.setFixedSize(32, 28)
-        icon.setStyleSheet(f"background: {SURFACE}; border: 1px solid #545463; border-radius: 7px;")
-        title = QLabel("settings")
-        title.setFont(ui_font(12, QFont.Weight.Bold))
-        version = QLabel("v1.0.0")
-        version.setStyleSheet("background: #202033; color: #757b89; border-radius: 5px; padding: 3px 8px;")
-        close_btn = QPushButton("x")
-        close_btn.setFixedSize(26, 26)
-        close_btn.clicked.connect(self.hide)
-
-        title_layout.addWidget(icon)
-        title_layout.addWidget(title)
-        title_layout.addStretch()
-        title_layout.addWidget(version)
-        title_layout.addWidget(close_btn)
-        root.addWidget(titlebar)
-
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setObjectName("Scroll")
         content = QWidget()
         self.content_layout = QVBoxLayout(content)
-        self.content_layout.setContentsMargins(18, 18, 18, 18)
-        self.content_layout.setSpacing(12)
+        self.content_layout.setContentsMargins(36, 28, 36, 88)
+        self.content_layout.setSpacing(18)
         scroll.setWidget(content)
         root.addWidget(scroll, 1)
 
+        self._build_header()
         self._build_hotkey()
         self._build_model()
         self._build_cleanup()
@@ -382,16 +370,50 @@ class SettingsWindow(QWidget):
         bottom = QFrame()
         bottom.setObjectName("BottomBar")
         bottom_layout = QHBoxLayout(bottom)
-        bottom_layout.setContentsMargins(18, 12, 18, 14)
+        bottom_layout.setContentsMargins(36, 12, 36, 12)
         bottom_layout.setSpacing(10)
+        back = QPushButton("Back to floating")
+        back.setObjectName("BackButton")
+        back.clicked.connect(self._return_to_floating)
         reset = QPushButton("reset")
         reset.clicked.connect(self.reset_defaults)
         self.save_btn = QPushButton("save settings")
         self.save_btn.setObjectName("SaveButton")
         self.save_btn.clicked.connect(self.save_settings)
+        bottom_layout.addWidget(back)
+        bottom_layout.addStretch()
         bottom_layout.addWidget(reset)
-        bottom_layout.addWidget(self.save_btn, 1)
+        bottom_layout.addWidget(self.save_btn)
         root.addWidget(bottom)
+
+    def _build_header(self):
+        header = QHBoxLayout()
+        header.setSpacing(16)
+
+        logo = QLabel("||")
+        logo.setFixedSize(28, 28)
+        logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        logo.setStyleSheet("background: #1f1f3a; color: #dce9ff; border-radius: 6px; font-weight: 900;")
+
+        labels = QVBoxLayout()
+        labels.setContentsMargins(0, 0, 0, 0)
+        labels.setSpacing(2)
+        title = QLabel("VoiceFlow Local settings")
+        title.setFont(ui_font(20, QFont.Weight.Bold))
+        title.setStyleSheet("color: #191919; background: transparent;")
+        subtitle = QLabel("Tune dictation, cleanup, saving, and startup behavior.")
+        subtitle.setFont(ui_font(10))
+        subtitle.setStyleSheet("color: #65615a; background: transparent;")
+        labels.addWidget(title)
+        labels.addWidget(subtitle)
+
+        version = QLabel("v1.0.0")
+        version.setStyleSheet("background: #f0ede5; color: #65615a; border: 1px solid #e4ddd0; border-radius: 8px; padding: 5px 9px; font-weight: 700;")
+        header.addWidget(logo)
+        header.addLayout(labels)
+        header.addStretch()
+        header.addWidget(version)
+        self.content_layout.addLayout(header)
 
     def _build_hotkey(self):
         card = SectionCard("HOTKEY")
@@ -411,7 +433,7 @@ class SettingsWindow(QWidget):
         device_layout.setContentsMargins(0, 0, 0, 0)
         device_layout.setSpacing(8)
         self.device_badge = QLabel(detect_cuda_label())
-        self.device_badge.setStyleSheet(f"background: #143d18; color: #69d36f; border-radius: 5px; padding: 5px 8px; font-weight: 700;")
+        self.device_badge.setStyleSheet("background: #e9f6ed; color: #16873c; border: 1px solid #c6e8d1; border-radius: 5px; padding: 4px 7px; font-weight: 700; font-size: 9px;")
         self.compute_type = self.combo(["float16", "float32", "int8"])
         device_layout.addWidget(self.device_badge)
         device_layout.addWidget(self.compute_type)
@@ -455,8 +477,9 @@ class SettingsWindow(QWidget):
         path_layout.setContentsMargins(0, 0, 0, 0)
         path_layout.setSpacing(8)
         self.log_path = QLabel(str(getattr(config, "LOG_FILE", os.path.join(config.BASE_DIR, "voiceflow_log.txt"))))
-        self.log_path.setMinimumWidth(220)
-        self.log_path.setStyleSheet(f"background: {BG}; color: {ACCENT}; border: 1px solid {BORDER}; border-radius: 5px; padding: 7px;")
+        self.log_path.setMinimumWidth(145)
+        self.log_path.setMaximumWidth(330)
+        self.log_path.setStyleSheet(f"background: #fbfaf7; color: {TEXT}; border: 1px solid {BORDER}; border-radius: 7px; padding: 7px 9px; font-size: 10px;")
         change = QPushButton("change")
         change.clicked.connect(self.change_log_path)
         path_layout.addWidget(self.log_path, 1)
@@ -486,8 +509,8 @@ class SettingsWindow(QWidget):
         card = SectionCard("STATS")
         stats = self._read_stats()
         grid = QGridLayout()
-        grid.setContentsMargins(0, 12, 0, 0)
-        grid.setHorizontalSpacing(0)
+        grid.setContentsMargins(0, 6, 0, 0)
+        grid.setHorizontalSpacing(8)
         labels = [
             (str(stats["total_dictations"]), "total dictations"),
             (f"{stats['avg_latency']:.1f}s", "avg latency"),
@@ -495,14 +518,15 @@ class SettingsWindow(QWidget):
         ]
         for col, (value, label) in enumerate(labels):
             box = QFrame()
-            box.setStyleSheet(f"QFrame {{ background: transparent; border-left: {'none' if col == 0 else '1px solid ' + BORDER}; border-radius: 0; }}")
+            box.setStyleSheet(f"QFrame {{ background: {SURFACE_ALT}; border: 1px solid {BORDER}; border-radius: 12px; }}")
             layout = QVBoxLayout(box)
-            layout.setContentsMargins(12, 8, 12, 8)
+            layout.setContentsMargins(10, 9, 10, 9)
             value_label = QLabel(value)
-            value_label.setFont(ui_font(15, QFont.Weight.Bold))
+            value_label.setFont(ui_font(15, QFont.Weight.DemiBold))
+            value_label.setStyleSheet(f"color: {TEXT}; background: transparent; border: none;")
             caption = QLabel(label)
             caption.setFont(ui_font(8))
-            caption.setStyleSheet(f"color: {MUTED};")
+            caption.setStyleSheet(f"color: {MUTED}; background: transparent; border: none;")
             layout.addWidget(value_label)
             layout.addWidget(caption)
             grid.addWidget(box, 0, col)
@@ -513,15 +537,16 @@ class SettingsWindow(QWidget):
         combo = QComboBox()
         combo.addItems(options)
         combo.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        combo.setMinimumWidth(150)
         return combo
 
     def slider(self, minimum: int, maximum: int, suffix: str = ""):
         slider = QSlider(Qt.Orientation.Horizontal)
         slider.setRange(minimum, maximum)
-        slider.setFixedWidth(130)
+        slider.setFixedWidth(180)
         value = QLabel()
         value.setMinimumWidth(28)
-        value.setStyleSheet(f"color: {ACCENT};")
+        value.setStyleSheet(f"color: {BLUE}; background: transparent;")
         slider.valueChanged.connect(lambda current: value.setText(f"{current}{suffix}"))
         return slider, value
 
@@ -548,7 +573,7 @@ class SettingsWindow(QWidget):
         add = QPushButton("+ add word")
         add.clicked.connect(self._add_filler)
         add.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        add.setStyleSheet(f"background: transparent; color: {TEXT}; border: 1px solid #545463; border-radius: 6px; padding: 6px 12px;")
+        add.setStyleSheet(f"background: {PRIMARY}; color: #ffffff; border: none; border-radius: 6px; padding: 6px 10px; font-size: 9px; font-weight: 700;")
         index = len(self.filler_words)
         self.chips.addWidget(add, index // 4, index % 4)
 
@@ -653,6 +678,10 @@ class SettingsWindow(QWidget):
         self.save_btn.setText("save settings")
         self.save_btn.setStyleSheet("")
 
+    def _return_to_floating(self):
+        self.return_to_floating.emit()
+        self.hide()
+
     def _read_stats(self) -> Dict[str, float]:
         entries: List[Dict[str, Any]] = []
         history_path = Path(config.BASE_DIR) / "history.json"
@@ -701,9 +730,10 @@ class SettingsWindow(QWidget):
             background: {BG};
             color: {TEXT};
             font-family: Segoe UI;
+            font-size: 10px;
         }}
         QFrame#Titlebar {{
-            background: {SURFACE};
+            background: {BG};
             border-bottom: 1px solid {BORDER};
         }}
         QFrame#BottomBar {{
@@ -719,7 +749,7 @@ class SettingsWindow(QWidget):
             width: 6px;
         }}
         QScrollBar::handle:vertical {{
-            background: #3a3a4a;
+            background: #d8d0c4;
             border-radius: 3px;
         }}
         QScrollBar::add-line:vertical,
@@ -727,27 +757,39 @@ class SettingsWindow(QWidget):
             height: 0px;
         }}
         QPushButton {{
-            background: transparent;
-            color: {TEXT};
-            border: 1px solid #545463;
+            background: {PRIMARY};
+            color: #ffffff;
+            border: none;
             border-radius: 8px;
-            padding: 8px 14px;
+            padding: 10px 14px;
             font-weight: 700;
+            font-size: 10px;
         }}
         QPushButton:hover {{
-            border-color: {ACCENT};
+            background: #2a2a2a;
         }}
         QPushButton#SaveButton {{
-            background: transparent;
-            border-color: #545463;
+            background: {BLUE};
+            color: white;
+            min-width: 150px;
+        }}
+        QPushButton#BackButton {{
+            background: #ffffff;
+            color: #191919;
+            border: 1px solid {BORDER};
+            min-width: 140px;
+        }}
+        QPushButton#BackButton:hover {{
+            background: #f0ede5;
         }}
         QComboBox {{
-            background: #282a27;
+            background: #fbfaf7;
             color: {TEXT};
-            border: 1px solid #4d504b;
+            border: 1px solid {BORDER};
             border-radius: 7px;
-            padding: 8px 12px;
-            min-width: 132px;
+            padding: 8px 10px;
+            min-width: 150px;
+            font-size: 10px;
         }}
         QComboBox::drop-down {{
             border: none;
@@ -756,21 +798,21 @@ class SettingsWindow(QWidget):
         QComboBox QAbstractItemView {{
             background: {SURFACE};
             color: {TEXT};
-            selection-background-color: {PRIMARY};
+            selection-background-color: {SURFACE_ALT};
             border: 1px solid {BORDER};
         }}
         QSlider::groove:horizontal {{
             height: 4px;
-            background: #333348;
+            background: #ded7cb;
             border-radius: 2px;
         }}
         QSlider::handle:horizontal {{
-            width: 16px;
-            height: 16px;
+            width: 14px;
+            height: 14px;
             margin: -6px 0;
-            border-radius: 8px;
-            background: {ACCENT};
-            border: 2px solid {PRIMARY};
+            border-radius: 7px;
+            background: {BLUE};
+            border: 1px solid #0b4d97;
         }}
         """
 

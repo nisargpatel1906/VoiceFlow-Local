@@ -1,7 +1,7 @@
 """
 VoiceFlow Local - Windows dictation app.
 
-PyQt6 tray popup UI + global Ctrl+Space push-to-talk dictation.
+ PyQt6 tray popup UI + global Ctrl+Win push-to-talk dictation.
 """
 
 from __future__ import annotations
@@ -14,9 +14,11 @@ import os
 import sys
 import threading
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, List
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal, pyqtSlot
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication
 
 import config
@@ -39,6 +41,13 @@ def setup_logging(debug_mode: bool = False):
         ],
     )
     return logging.getLogger(__name__)
+
+
+def app_logo_icon() -> QIcon:
+    logo_path = Path(__file__).resolve().with_name("logo.png")
+    if logo_path.exists():
+        return QIcon(str(logo_path))
+    return QIcon()
 
 
 class JsonlHistory:
@@ -100,6 +109,7 @@ class VoiceFlowApp(QObject):
 
         self.qt_app = QApplication.instance() or QApplication(sys.argv)
         self.qt_app.setQuitOnLastWindowClosed(False)
+        self.qt_app.setWindowIcon(app_logo_icon())
 
         self.window = VoiceFlowWindow()
         self.settings_window = None
@@ -145,11 +155,12 @@ class VoiceFlowApp(QObject):
         self.window.update_live_text("")
         self.window.set_hotkey_active(True)
         self.window.set_state("recording")
-        self.window.show_near_tray()
+        self.tray.show_floating()
         self.tray.set_state("recording")
 
         self.audio_thread = AudioCaptureThread()
         self.audio_thread.level_changed.connect(self.window.update_level)
+        self.audio_thread.level_changed.connect(self.tray.set_level)
         self.audio_thread.audio_finished.connect(self._submit_final_audio)
         self.audio_thread.error.connect(self._on_worker_error)
         audio_thread = self.audio_thread
@@ -250,7 +261,7 @@ class VoiceFlowApp(QObject):
 
     def _inject_text_async(self, text: str):
         # Keep focus on the previous app and keep Qt responsive while pyautogui pastes.
-        self.window.hide()
+        self.tray.show_floating()
         thread = threading.Thread(target=self.injector.inject_at_cursor, args=(text,), daemon=True)
         thread.start()
 
@@ -272,11 +283,18 @@ class VoiceFlowApp(QObject):
             self.settings_window = SettingsWindow()
             self.settings_window.settings_changed.connect(self._reload_settings)
             self.settings_window.window_hidden.connect(self.hotkey.resume_hotkey)
+            self.settings_window.return_to_floating.connect(self._return_to_floating)
 
         self.hotkey.pause_hotkey()
         self.settings_window.show()
         self.settings_window.raise_()
         self.settings_window.activateWindow()
+
+    @pyqtSlot()
+    def _return_to_floating(self):
+        if self.settings_window:
+            self.settings_window.hide()
+        self.tray.show_floating()
 
     @pyqtSlot()
     def _reload_settings(self):

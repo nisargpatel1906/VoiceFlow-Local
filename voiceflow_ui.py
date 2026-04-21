@@ -1,55 +1,40 @@
 """
-VoiceFlow Local - PyQt6 popup UI.
-
-Contains the tray popup window and all custom widgets for the dark VoiceFlow UI.
-The window is intentionally compact and non-activating so the user's last text
-field remains the paste target after dictation finishes.
+VoiceFlow Local - compact tray popup UI.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
 import pyperclip
 from PyQt6.QtCore import QByteArray, QEasingCurve, QEvent, QPoint, QPropertyAnimation, QRectF, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QCursor, QFont, QIcon, QPainter, QPen, QPixmap
 from PyQt6.QtSvg import QSvgRenderer
-from PyQt6.QtWidgets import (
-    QApplication,
-    QFrame,
-    QHBoxLayout,
-    QLabel,
-    QPushButton,
-    QScrollArea,
-    QSizePolicy,
-    QSystemTrayIcon,
-    QTextEdit,
-    QToolButton,
-    QVBoxLayout,
-    QWidget,
-)
+from PyQt6.QtWidgets import QApplication, QFrame, QGraphicsDropShadowEffect, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSystemTrayIcon, QTextEdit, QToolButton, QVBoxLayout, QWidget
 
 
-BG = "#0f0f13"
-SURFACE = "#16161e"
-BORDER = "#2a2a3a"
-TEXT = "#ECEFF1"
-MUTED = "#8c93a1"
-ACCENT = "#4A90D9"
-PRIMARY = "#1565C0"
-RECORDING = "#E53935"
-PROCESSING = "#F9A825"
-SUCCESS = "#2E7D32"
-NAVY = "#1A1A2E"
+BG = "#0d0d12"
+SURFACE = "#17171f"
+SURFACE_2 = "#1c1c26"
+BORDER = "#262636"
+TEXT = "#f1f3f7"
+MUTED = "#8f95a3"
+ACCENT = "#8bbcff"
+PRIMARY = "#1768c7"
+RECORDING = "#ffaaa8"
+RECORDING_DEEP = "#7c2b2e"
+PROCESSING = "#f6b84a"
+SUCCESS = "#2edc88"
+NAVY = "#1b1d35"
 
 
 MIC_SVG = """
-<svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <path d="M24 7C20.6863 7 18 9.68629 18 13V24C18 27.3137 20.6863 30 24 30C27.3137 30 30 27.3137 30 24V13C30 9.68629 27.3137 7 24 7Z" stroke="white" stroke-width="3.5" stroke-linecap="round"/>
-  <path d="M13 22V24C13 30.0751 17.9249 35 24 35C30.0751 35 35 30.0751 35 24V22" stroke="white" stroke-width="3.5" stroke-linecap="round"/>
-  <path d="M24 35V42" stroke="white" stroke-width="3.5" stroke-linecap="round"/>
-  <path d="M18 42H30" stroke="white" stroke-width="3.5" stroke-linecap="round"/>
+<svg width="40" height="40" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M24 8C20.7 8 18 10.7 18 14V24C18 27.3 20.7 30 24 30C27.3 30 30 27.3 30 24V14C30 10.7 27.3 8 24 8Z" stroke="white" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M13 23V24C13 30.1 17.9 35 24 35C30.1 35 35 30.1 35 24V23" stroke="white" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M24 35V41" stroke="white" stroke-width="3.5" stroke-linecap="round"/>
 </svg>
 """.strip()
 
@@ -60,107 +45,95 @@ def app_font(size: int, weight: QFont.Weight = QFont.Weight.Normal) -> QFont:
     return font
 
 
+def app_logo_icon() -> QIcon:
+    logo_path = Path(__file__).resolve().with_name("logo.png")
+    if logo_path.exists():
+        return QIcon(str(logo_path))
+    return QIcon()
+
+
 class LogoMark(QWidget):
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        self.setFixedSize(42, 42)
+        self.setFixedSize(24, 24)
 
-    def paintEvent(self, event):  # noqa: N802 - Qt override
+    def paintEvent(self, event):  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QColor(NAVY))
-        painter.drawRoundedRect(self.rect(), 10, 10)
-
-        bar_width = 4
-        heights = [16, 24, 32, 24, 16]
-        start_x = 8
-        for index, height in enumerate(heights):
-            x = start_x + index * 7
-            y = (self.height() - height) / 2
-            painter.setBrush(QColor("#ffffff"))
-            painter.drawRoundedRect(QRectF(x, y, bar_width, height), 2, 2)
+        painter.drawRoundedRect(self.rect(), 5, 5)
+        painter.setBrush(QColor("#dce9ff"))
+        for x, height in zip([6, 11, 16], [12, 17, 10]):
+            painter.drawRoundedRect(QRectF(x, (24 - height) / 2, 3, height), 1.5, 1.5)
 
 
 class StatusPill(QFrame):
-    def __init__(self, parent: Optional[QWidget] = None):
-        super().__init__(parent)
-        self.state = "ready"
+    def __init__(self):
+        super().__init__()
         self.dot = QLabel()
+        self.dot.setFixedSize(6, 6)
         self.label = QLabel("ready")
-        self.dot.setFixedSize(8, 8)
-        self.label.setFont(app_font(10))
-        self.label.setStyleSheet(f"color: {MUTED};")
-
+        self.label.setFont(app_font(7, QFont.Weight.Bold))
+        self.label.setStyleSheet(f"color: {MUTED}; background: transparent;")
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 4, 10, 4)
-        layout.setSpacing(7)
+        layout.setContentsMargins(7, 4, 7, 4)
+        layout.setSpacing(5)
         layout.addWidget(self.dot)
         layout.addWidget(self.label)
-
-        self._pulse_timer = QTimer(self)
-        self._pulse_timer.timeout.connect(self._toggle_pulse)
-        self._pulse_on = False
+        self._pulse = False
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
         self.set_state("ready")
 
     def set_state(self, state: str):
         self.state = state
-        labels = {"ready": "ready", "recording": "recording", "processing": "processing"}
+        labels = {"ready": "ready", "recording": "RECORDING", "processing": "processing"}
         colors = {"ready": SUCCESS, "recording": RECORDING, "processing": PROCESSING}
         self.label.setText(labels.get(state, state))
-        self._set_dot(colors.get(state, SUCCESS))
-        self.setStyleSheet(
-            f"QFrame {{ background: #1b1b2a; border: 1px solid #30304a; border-radius: 14px; }}"
-        )
+        pill_bg = "#191c1e" if state != "recording" else "#2a171b"
+        pill_border = "#22382e" if state == "ready" else ("#5e2b33" if state == "recording" else "#4d3b1f")
+        self.setStyleSheet(f"QFrame {{ background: {pill_bg}; border: 1px solid {pill_border}; border-radius: 9px; }}")
+        self._set_dot(colors.get(state, SUCCESS), 1.0)
         if state == "recording":
-            self._pulse_timer.start(450)
+            self._timer.start(450)
         else:
-            self._pulse_timer.stop()
-            self._pulse_on = False
+            self._timer.stop()
 
-    def _set_dot(self, color: str, opacity: float = 1.0):
-        qcolor = QColor(color)
-        qcolor.setAlphaF(opacity)
-        self.dot.setStyleSheet(f"background: rgba({qcolor.red()}, {qcolor.green()}, {qcolor.blue()}, {qcolor.alpha()}); border-radius: 4px;")
+    def _set_dot(self, color: str, opacity: float):
+        c = QColor(color)
+        c.setAlphaF(opacity)
+        self.dot.setStyleSheet(f"background: rgba({c.red()}, {c.green()}, {c.blue()}, {c.alpha()}); border-radius: 3px;")
 
-    def _toggle_pulse(self):
-        self._pulse_on = not self._pulse_on
-        self._set_dot(RECORDING, 1.0 if self._pulse_on else 0.45)
+    def _tick(self):
+        self._pulse = not self._pulse
+        self._set_dot(RECORDING, 1.0 if self._pulse else 0.45)
 
 
 class KeyBadge(QLabel):
-    def __init__(self, text: str, parent: Optional[QWidget] = None):
-        super().__init__(text, parent)
+    def __init__(self, text: str):
+        super().__init__(text)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setFixedHeight(30)
-        self.setMinimumWidth(64 if text == "Space" else 54)
-        self.setFont(app_font(10, QFont.Weight.DemiBold))
+        self.setFixedHeight(18)
+        self.setMinimumWidth(36 if len(text) >= 4 else 28)
+        self.setFont(app_font(7, QFont.Weight.Bold))
         self.set_active(False)
 
     def set_active(self, active: bool):
-        bg = "#1b2d4a" if active else "#1b1b28"
-        border = ACCENT if active else "#3a3a56"
-        color = TEXT if active else "#a8afbd"
-        self.setStyleSheet(
-            f"QLabel {{ background: {bg}; color: {color}; border: 1px solid {border}; border-radius: 7px; padding: 4px 10px; }}"
-        )
+        bg = "#32415b" if active else "#222634"
+        color = "#dbe8ff" if active else "#c1c7d1"
+        self.setStyleSheet(f"background: {bg}; color: {color}; border: 1px solid #303646; border-radius: 3px; padding: 1px 5px;")
 
 
 class HotkeyDisplay(QWidget):
-    def __init__(self, parent: Optional[QWidget] = None):
-        super().__init__(parent)
+    def __init__(self):
+        super().__init__()
         self.ctrl = KeyBadge("Ctrl")
-        self.space = KeyBadge("Space")
-        plus = QLabel("+")
-        plus.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        plus.setFont(app_font(10, QFont.Weight.Bold))
-        plus.setStyleSheet(f"color: {MUTED};")
-
+        self.space = KeyBadge("Win")
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(7)
+        layout.setSpacing(5)
         layout.addWidget(self.ctrl)
-        layout.addWidget(plus)
         layout.addWidget(self.space)
 
     def set_active(self, active: bool):
@@ -169,28 +142,25 @@ class HotkeyDisplay(QWidget):
 
 
 class MicButton(QToolButton):
-    clicked = pyqtSignal()
-
-    def __init__(self, parent: Optional[QWidget] = None):
-        super().__init__(parent)
-        self.setFixedSize(112, 112)
-        self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        self.setToolTip("Hold Ctrl+Space to start")
+    def __init__(self):
+        super().__init__()
+        self.setFixedSize(104, 92)
+        self.setToolTip("Hold Ctrl+Win to start")
         self.state = "ready"
-        self._pulse_radius = 42.0
+        self._radius = 32.0
         self._svg = QSvgRenderer(QByteArray(MIC_SVG.encode("utf-8")))
-        self._pulse = QPropertyAnimation(self, b"pulseRadius", self)
-        self._pulse.setStartValue(42.0)
-        self._pulse.setEndValue(54.0)
-        self._pulse.setDuration(850)
-        self._pulse.setEasingCurve(QEasingCurve.Type.InOutSine)
-        self._pulse.setLoopCount(-1)
+        self._anim = QPropertyAnimation(self, b"pulseRadius", self)
+        self._anim.setStartValue(32.0)
+        self._anim.setEndValue(45.0)
+        self._anim.setDuration(850)
+        self._anim.setEasingCurve(QEasingCurve.Type.InOutSine)
+        self._anim.setLoopCount(-1)
 
-    def get_pulse_radius(self) -> float:
-        return self._pulse_radius
+    def get_pulse_radius(self):
+        return self._radius
 
-    def set_pulse_radius(self, value: float):
-        self._pulse_radius = value
+    def set_pulse_radius(self, value):
+        self._radius = value
         self.update()
 
     pulseRadius = property(get_pulse_radius, set_pulse_radius)
@@ -198,113 +168,308 @@ class MicButton(QToolButton):
     def set_state(self, state: str):
         self.state = state
         if state == "recording":
-            self._pulse.start()
+            self._anim.start()
         else:
-            self._pulse.stop()
-            self._pulse_radius = 42.0
+            self._anim.stop()
+            self._radius = 32.0
         self.update()
 
-    def paintEvent(self, event):  # noqa: N802 - Qt override
+    def paintEvent(self, event):  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         center = self.rect().center()
-
         if self.state == "recording":
             pulse = QColor(RECORDING)
-            pulse.setAlpha(70)
+            pulse.setAlpha(58)
             painter.setBrush(pulse)
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawEllipse(center, int(self._pulse_radius), int(self._pulse_radius))
-
+            painter.drawEllipse(center, int(self._radius), int(self._radius))
         fill = QColor(RECORDING if self.state == "recording" else PRIMARY)
+        painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(fill)
-        painter.setPen(QPen(QColor("#2b5ca2" if self.state != "recording" else "#ff7774"), 2))
-        painter.drawEllipse(center, 40, 40)
-
-        self._svg.render(painter, QRectF(center.x() - 20, center.y() - 22, 40, 40))
+        painter.drawEllipse(center, 30, 30)
+        self._svg.render(painter, QRectF(center.x() - 15, center.y() - 17, 30, 30))
 
 
 class WaveformWidget(QWidget):
-    def __init__(self, parent: Optional[QWidget] = None):
-        super().__init__(parent)
-        self.setFixedSize(92, 42)
-        self.level = 0.15
+    def __init__(self):
+        super().__init__()
+        self.setFixedSize(70, 34)
         self.recording = False
+        self.level = 0.2
         self.phase = 0
-        self._timer = QTimer(self)
-        self._timer.timeout.connect(self._tick)
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._tick)
 
     def set_recording(self, recording: bool):
         self.recording = recording
         if recording:
-            self._timer.start(90)
+            self.timer.start(80)
         else:
-            self._timer.stop()
-            self.level = 0.12
+            self.timer.stop()
+            self.level = 0.18
         self.update()
 
     def set_level(self, level: float):
-        self.level = max(0.08, min(1.0, level))
+        self.level = max(0.12, min(level, 1.0))
         self.update()
 
     def _tick(self):
-        self.phase = (self.phase + 1) % 14
+        self.phase = (self.phase + 1) % 10
         self.update()
 
-    def paintEvent(self, event):  # noqa: N802 - Qt override
+    def paintEvent(self, event):  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
-        color = QColor(ACCENT)
-        color.setAlpha(220 if self.recording else 90)
-        painter.setBrush(color)
-
-        base = [0.35, 0.55, 0.78, 1.0, 0.78, 0.55, 0.35]
-        width = 6
-        gap = 7
-        start_x = (self.width() - (7 * width + 6 * gap)) / 2
-        for i, scale in enumerate(base):
-            wobble = 0.25 if self.recording and (i + self.phase) % 3 == 0 else 0
-            height = 8 + (self.height() - 10) * min(1.0, self.level * scale + wobble)
-            x = start_x + i * (width + gap)
+        painter.setBrush(QColor("#9bc8ff" if self.recording else "#6f91bd"))
+        base = [0.35, 0.65, 0.95, 0.55, 0.8, 0.42, 0.6]
+        for index, scale in enumerate(base):
+            extra = 0.25 if self.recording and (index + self.phase) % 4 == 0 else 0
+            height = 6 + (self.height() - 9) * min(1, self.level * scale + extra)
+            x = 7 + index * 9
             y = (self.height() - height) / 2
-            painter.drawRoundedRect(QRectF(x, y, width, height), 3, 3)
+            painter.drawRoundedRect(QRectF(x, y, 4, height), 2, 2)
+
+
+class FloatingBar(QWidget):
+    clicked = pyqtSignal()
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowFlags(
+            Qt.WindowType.Tool
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.WindowDoesNotAcceptFocus
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.state = "idle"
+        self.level = 0.2
+        self.phase = 0
+        self.hovered = False
+        self._anchor_center_x: Optional[int] = None
+        self._anchor_bottom: Optional[int] = None
+        self._did_initial_reanchor = False
+        self._repositioning = False
+        self._position_lock = QTimer(self)
+        self._position_lock.setInterval(40)
+        self._position_lock.timeout.connect(self._enforce_anchor)
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._tick)
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(24)
+        shadow.setOffset(0, 4)
+        shadow.setColor(QColor(0, 0, 0, 165))
+        self.setGraphicsEffect(shadow)
+        self._apply_size()
+
+    def mouseDoubleClickEvent(self, event):  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mouseDoubleClickEvent(event)
+
+    def showEvent(self, event):  # noqa: N802
+        super().showEvent(event)
+        self._move_to_anchor()
+        self._position_lock.start()
+        if not self._did_initial_reanchor:
+            self._did_initial_reanchor = True
+            self._schedule_initial_reanchor()
+
+    def hideEvent(self, event):  # noqa: N802
+        self._position_lock.stop()
+        super().hideEvent(event)
+
+    def moveEvent(self, event):  # noqa: N802
+        super().moveEvent(event)
+        if not self._repositioning:
+            QTimer.singleShot(0, self._enforce_anchor)
+
+    def enterEvent(self, event):  # noqa: N802
+        self.hovered = True
+        self._apply_size()
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):  # noqa: N802
+        self.hovered = False
+        self._apply_size()
+        self.update()
+        super().leaveEvent(event)
+
+    def set_state(self, state: str):
+        self.state = state
+        if state == "recording":
+            self.timer.start(90)
+        else:
+            self.timer.stop()
+            self.phase = 0
+        self._apply_size()
+        self.update()
+
+    def set_level(self, level: float):
+        self.level = max(0.1, min(level, 1.0))
+        self.update()
+
+    def _tick(self):
+        self.phase = (self.phase + 1) % 12
+        self.update()
+
+    def show_center_top(self):
+        screen = QApplication.primaryScreen().availableGeometry()
+        self._set_anchor(screen)
+        self._move_to_anchor()
+        self.show()
+        self.raise_()
+
+    def _apply_size(self):
+        if self.state == "idle" and self.hovered:
+            self.setFixedSize(330, 96)
+        elif self.state == "idle":
+            self.setFixedSize(120, 32)
+        else:
+            self.setFixedSize(132, 44)
+
+        if self._anchor_center_x is not None and self._anchor_bottom is not None:
+            self._move_to_anchor()
+
+    def _set_anchor(self, screen):
+        self._anchor_center_x = screen.left() + screen.width() // 2
+        self._anchor_bottom = screen.bottom()
+
+    def _move_to_anchor(self):
+        if self._anchor_center_x is None or self._anchor_bottom is None:
+            return
+        x = self._anchor_center_x - self.width() // 2
+        y = self._anchor_bottom - self.height() + 1
+        target = QPoint(x, y)
+        if self.pos() == target:
+            return
+        self._repositioning = True
+        try:
+            self.move(target)
+        finally:
+            self._repositioning = False
+
+    def _schedule_initial_reanchor(self):
+        for delay in (0, 120, 260, 420, 700):
+            QTimer.singleShot(delay, self._move_to_anchor)
+
+    def _enforce_anchor(self):
+        if not self.isVisible() or self._anchor_center_x is None or self._anchor_bottom is None:
+            return
+        self._move_to_anchor()
+
+    def paintEvent(self, event):  # noqa: N802
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        if self.state == "idle" and not self.hovered:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(255, 255, 255, 28))
+            painter.drawRoundedRect(QRectF(32, 9, 56, 14), 7, 7)
+            painter.setBrush(QColor(42, 42, 42, 170))
+            painter.drawRoundedRect(QRectF(38, 12, 44, 8), 4, 4)
+            painter.setPen(QPen(QColor(255, 255, 255, 62), 1))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(QRectF(32, 9, 56, 14), 7, 7)
+        elif self.state == "idle":
+            glass = QColor(10, 10, 12, 184)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(255, 255, 255, 22))
+            painter.drawRoundedRect(QRectF(4, 0, 322, 64), 29, 29)
+            painter.setBrush(glass)
+            painter.setPen(QPen(QColor(255, 255, 255, 34), 1))
+            painter.drawRoundedRect(QRectF(10, 4, 310, 56), 25, 25)
+            painter.setPen(QPen(QColor(255, 255, 255, 20), 1))
+            painter.drawRoundedRect(QRectF(12, 6, 306, 52), 23, 23)
+            painter.setPen(QPen(QColor(255, 255, 255, 128), 1))
+            painter.setBrush(QColor(8, 8, 9, 158))
+            painter.drawRoundedRect(QRectF(108, 72, 114, 24), 12, 12)
+            self._draw_dots(painter, 145, 83, QColor(185, 185, 190))
+
+            painter.setFont(app_font(10, QFont.Weight.Medium))
+            painter.setPen(QColor("#ffffff"))
+            painter.drawText(QRectF(36, 4, 76, 56), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, "Click or hold")
+            painter.setPen(QColor("#ff9be7"))
+            painter.setFont(app_font(10, QFont.Weight.Bold))
+            painter.drawText(QRectF(114, 4, 78, 56), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, "Ctrl + Win")
+            painter.setPen(QColor("#ffffff"))
+            painter.setFont(app_font(10, QFont.Weight.Medium))
+            painter.drawText(QRectF(202, 4, 90, 56), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, "to dictate")
+        elif self.state == "recording":
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(255, 255, 255, 22))
+            painter.drawRoundedRect(QRectF(5, 7, 122, 32), 16, 16)
+            painter.setBrush(QColor(18, 10, 11, 172))
+            painter.setPen(QPen(QColor(255, 255, 255, 44), 1))
+            painter.drawRoundedRect(QRectF(8, 10, 116, 26), 13, 13)
+            self._draw_wave(painter, x_offset=38, y_center=23)
+        elif self.state == "processing":
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(255, 255, 255, 22))
+            painter.drawRoundedRect(QRectF(5, 7, 122, 32), 16, 16)
+            painter.setBrush(QColor(12, 10, 5, 172))
+            painter.setPen(QPen(QColor(255, 255, 255, 44), 1))
+            painter.drawRoundedRect(QRectF(8, 10, 116, 26), 13, 13)
+            self._draw_dots(painter, 48, 22, QColor(PROCESSING))
+        else:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor("#050506"))
+            painter.drawRoundedRect(QRectF(68, 36, 66, 8), 4, 4)
+
+    def _draw_dots(self, painter: QPainter, x: int, y: int, color: QColor):
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(color)
+        for index in range(10):
+            painter.drawEllipse(x + index * 4, y, 2, 2)
+
+    def _draw_wave(self, painter: QPainter, x_offset: int = 32, y_center: int = 23):
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#9bc8ff"))
+        base = [0.35, 0.65, 0.95, 0.55, 0.8, 0.42, 0.6]
+        for index, scale in enumerate(base):
+            extra = 0.25 if (index + self.phase) % 4 == 0 else 0
+            height = 5 + 17 * min(1, self.level * scale + extra)
+            x = x_offset + index * 8
+            y = y_center - height / 2
+            painter.drawRoundedRect(QRectF(x, y, 4, height), 2, 2)
 
 
 class LiveTextBox(QFrame):
     copy_requested = pyqtSignal(str)
 
-    def __init__(self, parent: Optional[QWidget] = None):
-        super().__init__(parent)
+    def __init__(self):
+        super().__init__()
         self._text = ""
-        self.live_badge = QLabel("● LIVE")
-        self.live_badge.setFont(app_font(8, QFont.Weight.Bold))
-        self.live_badge.setStyleSheet(
-            f"background: rgba(229,57,53,0.15); color: {RECORDING}; border: 1px solid rgba(229,57,53,0.35); border-radius: 8px; padding: 2px 7px;"
-        )
+        self.setStyleSheet(f"QFrame {{ background: {BG}; border: none; }}")
+        self.live_badge = QLabel("LIVE")
+        self.live_badge.setFont(app_font(7, QFont.Weight.Bold))
+        self.live_badge.setStyleSheet(f"color: {RECORDING}; background: transparent;")
         self.live_badge.hide()
 
         self.editor = QTextEdit()
         self.editor.setReadOnly(True)
         self.editor.setAcceptRichText(False)
-        self.editor.setFont(app_font(11))
-        self.editor.setPlaceholderText("")
+        self.editor.setPlaceholderText("Speak to type")
+        self.editor.setFixedHeight(60)
+        self.editor.setFont(app_font(9))
         self.editor.setStyleSheet(
-            f"QTextEdit {{ background: {BG}; color: {TEXT}; border: 1px solid {BORDER}; border-radius: 8px; padding: 10px; selection-background-color: {PRIMARY}; }}"
+            f"QTextEdit {{ background: #0c0c12; color: {TEXT}; border: 1px solid {BORDER}; border-radius: 5px; padding: 9px; }}"
+            f"QTextEdit:!focus {{ color: {TEXT}; }}"
         )
-        self.editor.setFixedHeight(96)
 
-        self.copy_button = QPushButton("copy")
-        self.copy_button.setFont(app_font(10, QFont.Weight.DemiBold))
-        self.copy_button.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        self.copy_button.clicked.connect(lambda: self.copy_requested.emit(self._text))
-        self.copy_button.setStyleSheet(
-            f"QPushButton {{ color: {TEXT}; background: transparent; border: 1px solid #545463; border-radius: 7px; padding: 7px 16px; }}"
-            f"QPushButton:hover {{ border-color: {ACCENT}; color: white; }}"
-        )
         self.char_count = QLabel("0 chars")
-        self.char_count.setFont(app_font(9))
-        self.char_count.setStyleSheet(f"color: {MUTED};")
+        self.char_count.setFont(app_font(7, QFont.Weight.Bold))
+        self.char_count.setStyleSheet(f"color: {MUTED}; background: transparent;")
+        self.copy_button = QPushButton("Copy")
+        self.copy_button.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.copy_button.setFont(app_font(8, QFont.Weight.Bold))
+        self.copy_button.clicked.connect(lambda: self.copy_requested.emit(self._text))
+        self.copy_button.setStyleSheet(f"border: none; color: {ACCENT}; padding: 0; background: transparent;")
 
         top = QHBoxLayout()
         top.setContentsMargins(0, 0, 0, 0)
@@ -312,14 +477,14 @@ class LiveTextBox(QFrame):
         top.addWidget(self.live_badge)
 
         bottom = QHBoxLayout()
-        bottom.setContentsMargins(0, 0, 0, 0)
-        bottom.addWidget(self.copy_button)
-        bottom.addStretch()
+        bottom.setContentsMargins(0, 4, 0, 0)
         bottom.addWidget(self.char_count)
+        bottom.addStretch()
+        bottom.addWidget(self.copy_button)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
+        layout.setSpacing(0)
         layout.addLayout(top)
         layout.addWidget(self.editor)
         layout.addLayout(bottom)
@@ -335,7 +500,7 @@ class LiveTextBox(QFrame):
         self.editor.setTextCursor(cursor)
         self.char_count.setText(f"{len(self._text)} chars")
 
-    def text(self) -> str:
+    def text(self):
         return self._text
 
 
@@ -343,62 +508,35 @@ class HistoryEntry(QFrame):
     selected = pyqtSignal(dict)
     copy_requested = pyqtSignal(str)
 
-    def __init__(self, entry: Dict, parent: Optional[QWidget] = None):
-        super().__init__(parent)
+    def __init__(self, entry: Dict):
+        super().__init__()
         self.entry = entry
         self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.setObjectName("HistoryEntry")
         self.setStyleSheet(
-            f"QFrame#HistoryEntry {{ background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 8px; }}"
-            f"QFrame#HistoryEntry:hover {{ border-color: {ACCENT}; }}"
+            "QFrame#HistoryEntry { background: #ffffff; border: 1px solid #e9e5dc; border-radius: 10px; }"
+            "QFrame#HistoryEntry:hover { border-color: #d8ccb8; background: #fffdf8; }"
         )
-
         preview = entry.get("text", "")
-        if len(preview) > 62:
-            preview = preview[:59] + "..."
-
+        if len(preview) > 48:
+            preview = preview[:45] + "..."
         text_label = QLabel(preview)
-        text_label.setFont(app_font(10, QFont.Weight.DemiBold))
         text_label.setWordWrap(True)
-        text_label.setStyleSheet(f"color: {TEXT};")
+        text_label.setFont(app_font(11, QFont.Weight.DemiBold))
+        text_label.setStyleSheet("color: #232323; background: transparent;")
+        meta = QLabel(f"{entry.get('time_label', '')}    {entry.get('chars', 0)} chars    saved")
+        meta.setFont(app_font(8, QFont.Weight.DemiBold))
+        meta.setStyleSheet("color: #77746d; background: transparent;")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(8)
+        layout.addWidget(text_label)
+        layout.addWidget(meta)
 
-        meta = QLabel(f"{entry.get('time_label', '')}  ·  {entry.get('chars', 0)} chars  ·  ✓ saved")
-        meta.setFont(app_font(8))
-        meta.setStyleSheet(f"color: {MUTED};")
-
-        self.copy_button = QPushButton("copy")
-        self.copy_button.setFixedWidth(54)
-        self.copy_button.hide()
-        self.copy_button.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        self.copy_button.clicked.connect(lambda: self.copy_requested.emit(entry.get("text", "")))
-        self.copy_button.setStyleSheet(
-            f"QPushButton {{ background: #1d2a40; color: {TEXT}; border: 1px solid {ACCENT}; border-radius: 6px; padding: 4px; }}"
-        )
-
-        labels = QVBoxLayout()
-        labels.setContentsMargins(0, 0, 0, 0)
-        labels.setSpacing(4)
-        labels.addWidget(text_label)
-        labels.addWidget(meta)
-
-        row = QHBoxLayout(self)
-        row.setContentsMargins(10, 9, 10, 9)
-        row.setSpacing(8)
-        row.addLayout(labels, 1)
-        row.addWidget(self.copy_button)
-
-    def mousePressEvent(self, event):  # noqa: N802 - Qt override
+    def mousePressEvent(self, event):  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton:
             self.selected.emit(self.entry)
         super().mousePressEvent(event)
-
-    def enterEvent(self, event):  # noqa: N802 - Qt override
-        self.copy_button.show()
-        super().enterEvent(event)
-
-    def leaveEvent(self, event):  # noqa: N802 - Qt override
-        self.copy_button.hide()
-        super().leaveEvent(event)
 
 
 class VoiceFlowWindow(QWidget):
@@ -409,17 +547,13 @@ class VoiceFlowWindow(QWidget):
 
     def __init__(self):
         super().__init__()
-        self.setFixedSize(320, 580)
+        self.setFixedSize(1180, 720)
         self.setWindowTitle("VoiceFlow Local")
-        self.setWindowFlags(
-            Qt.WindowType.Tool
-            | Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.WindowStaysOnTopHint
-        )
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
-        self.setStyleSheet(f"background: {BG}; color: {TEXT};")
+        self.setWindowIcon(app_logo_icon())
+        self.setWindowFlags(Qt.WindowType.Window)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, False)
+        self.setStyleSheet("background: #f7f5ef; color: #222222;")
         self.current_state = "idle"
-
         self.status = StatusPill()
         self.hotkey = HotkeyDisplay()
         self.mic = MicButton()
@@ -427,115 +561,153 @@ class VoiceFlowWindow(QWidget):
         self.live_box = LiveTextBox()
         self.history_list = QVBoxLayout()
         self.history_list.setContentsMargins(0, 0, 0, 0)
-        self.history_list.setSpacing(6)
+        self.history_list.setSpacing(7)
         self.history_list.addStretch()
-
         self.live_box.copy_requested.connect(self.copy_requested)
-
         self._build()
 
     def _build(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(14, 12, 14, 12)
-        root.setSpacing(10)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        top = QHBoxLayout()
-        top.setContentsMargins(0, 0, 0, 0)
-        logo = LogoMark()
-        wordmark = QLabel('<span style="font-weight:700; color:#ECEFF1;">VoiceFlow</span> <span style="color:#4A90D9;">Local</span>')
-        wordmark.setFont(app_font(14, QFont.Weight.DemiBold))
-        top.addWidget(logo)
-        top.addWidget(wordmark)
-        top.addStretch()
-        top.addWidget(self.status)
-        root.addLayout(top)
+        shell = QHBoxLayout()
+        shell.setContentsMargins(36, 34, 36, 30)
+        shell.setSpacing(28)
+        root.addLayout(shell, 1)
 
-        panel = QFrame()
-        panel.setStyleSheet(f"QFrame {{ background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 10px; }}")
-        panel_layout = QVBoxLayout(panel)
-        panel_layout.setContentsMargins(14, 12, 14, 12)
-        panel_layout.setSpacing(10)
+        main = QVBoxLayout()
+        main.setSpacing(20)
+        shell.addLayout(main, 1)
 
-        hotkey_row = QHBoxLayout()
-        hotkey_label = QLabel("HOTKEY")
-        hotkey_label.setFont(app_font(9, QFont.Weight.DemiBold))
-        hotkey_label.setStyleSheet(f"color: {MUTED};")
-        hotkey_row.addWidget(hotkey_label)
-        hotkey_row.addStretch()
-        hotkey_row.addWidget(self.hotkey)
-        panel_layout.addLayout(hotkey_row)
+        greeting_row = QHBoxLayout()
+        greeting = QLabel("Hey Nisarg, get back into the flow with")
+        greeting.setFont(app_font(17, QFont.Weight.Bold))
+        greeting.setStyleSheet("color: #151515; background: transparent;")
+        ctrl = QLabel("Ctrl")
+        win = QLabel("Win")
+        for chip in (ctrl, win):
+            chip.setFont(app_font(13, QFont.Weight.Bold))
+            chip.setStyleSheet("background: #ffae43; color: #17120a; border: 1px solid #a65f12; border-radius: 5px; padding: 6px 9px;")
+        plus = QLabel("+")
+        plus.setFont(app_font(16, QFont.Weight.Bold))
+        plus.setStyleSheet("color: #151515; background: transparent;")
+        greeting_row.addWidget(greeting)
+        greeting_row.addWidget(ctrl)
+        greeting_row.addWidget(plus)
+        greeting_row.addWidget(win)
+        greeting_row.addStretch()
+        main.addLayout(greeting_row)
 
-        panel_layout.addSpacing(2)
-        mic_row = QHBoxLayout()
-        mic_row.addStretch()
-        mic_row.addWidget(self.mic)
-        mic_row.addStretch()
-        panel_layout.addLayout(mic_row)
+        top_cards = QHBoxLayout()
+        top_cards.setSpacing(18)
+        control_card = QFrame()
+        control_card.setFixedHeight(220)
+        control_card.setStyleSheet("QFrame { background: #ffffff; border: 1px solid #e8e2d8; border-radius: 16px; }")
+        control_layout = QHBoxLayout(control_card)
+        control_layout.setContentsMargins(24, 20, 24, 20)
+        control_layout.setSpacing(20)
+        mic_area = QVBoxLayout()
+        title = QLabel("Dictation control")
+        title.setFont(app_font(20, QFont.Weight.Bold))
+        title.setStyleSheet("color: #191919; background: transparent;")
+        subtitle = QLabel("Hold the hotkey, speak naturally, and VoiceFlow pastes the final text into your active app.")
+        subtitle.setWordWrap(True)
+        subtitle.setFont(app_font(10))
+        subtitle.setStyleSheet("color: #65615a; background: transparent;")
+        mic_area.addWidget(title)
+        mic_area.addWidget(subtitle)
+        mic_area.addStretch()
+        mic_area.addWidget(self.live_box)
+        self.live_box.editor.setStyleSheet("QTextEdit { background: #fbfaf7; color: #222222; border: 1px solid #ece5d8; border-radius: 8px; padding: 12px; }")
+        self.live_box.char_count.setStyleSheet("color: #78736c; background: transparent;")
+        self.live_box.copy_button.setStyleSheet("border: none; color: #6c4a1d; padding: 0; background: transparent;")
+        control_layout.addLayout(mic_area, 1)
+        meter = QVBoxLayout()
+        meter.addStretch()
+        meter.addWidget(self.mic, alignment=Qt.AlignmentFlag.AlignCenter)
+        meter.addWidget(self.waveform, alignment=Qt.AlignmentFlag.AlignCenter)
+        meter.addStretch()
+        control_layout.addLayout(meter)
+        top_cards.addWidget(control_card, 1)
 
-        hint = QLabel('<span style="color:#7f8591;">Hold </span><span style="color:#4A90D9; font-weight:700;">Ctrl + Space</span><span style="color:#7f8591;"> to dictate</span>')
-        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        hint.setFont(app_font(9))
-        panel_layout.addWidget(hint)
-
-        wave_row = QHBoxLayout()
-        wave_row.addStretch()
-        wave_row.addWidget(self.waveform)
-        wave_row.addStretch()
-        panel_layout.addLayout(wave_row)
-
-        panel_layout.addWidget(self.live_box)
-        root.addWidget(panel)
-
-        divider = QFrame()
-        divider.setFixedHeight(1)
-        divider.setStyleSheet(f"background: {BORDER};")
-        root.addWidget(divider)
+        stats_card = QFrame()
+        stats_card.setFixedSize(220, 220)
+        stats_card.setStyleSheet("QFrame { background: #f0ede5; border: 1px solid #e4ddd0; border-radius: 16px; }")
+        stats_layout = QVBoxLayout(stats_card)
+        stats_layout.setContentsMargins(24, 20, 24, 20)
+        for value, label in (("15", "total words"), ("85", "wpm today"), ("1", "day streak")):
+            stat = QLabel(f"<span style='font-size:28px; color:#191919;'>{value}</span> <span style='font-size:13px; color:#333333;'>{label}</span>")
+            stat.setStyleSheet("background: transparent;")
+            stats_layout.addWidget(stat)
+        stats_layout.addStretch()
+        top_cards.addWidget(stats_card)
+        main.addLayout(top_cards)
 
         history_header = QHBoxLayout()
-        label = QLabel("HISTORY")
-        label.setFont(app_font(10, QFont.Weight.DemiBold))
-        label.setStyleSheet(f"color: {MUTED};")
-        clear = QPushButton("clear all")
-        clear.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        today = QLabel("TODAY")
+        today.setFont(app_font(10, QFont.Weight.Bold))
+        today.setStyleSheet("color: #7b7770; background: transparent; letter-spacing: 1px;")
+        clear = QPushButton("Clear all")
         clear.clicked.connect(self.clear_history_requested)
-        clear.setStyleSheet(
-            f"QPushButton {{ background: transparent; color: {TEXT}; border: 1px solid #4a4a56; border-radius: 7px; padding: 5px 12px; }}"
-            f"QPushButton:hover {{ border-color: {ACCENT}; }}"
-        )
-        history_header.addWidget(label)
+        clear.setStyleSheet("QPushButton { border: none; color: #7b5b2e; background: transparent; font-weight: 700; }")
+        history_header.addWidget(today)
         history_header.addStretch()
         history_header.addWidget(clear)
-        root.addLayout(history_header)
+        main.addLayout(history_header)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setStyleSheet(
-            f"QScrollArea {{ border: none; background: {BG}; }}"
-            f"QScrollBar:vertical {{ background: {BG}; width: 5px; }}"
-            f"QScrollBar::handle:vertical {{ background: #39394c; border-radius: 2px; }}"
+            "QScrollArea { border: none; background: #f7f5ef; }"
+            "QScrollBar:vertical { background: #f7f5ef; width: 6px; }"
+            "QScrollBar::handle:vertical { background: #d8d0c4; border-radius: 3px; }"
             "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
         )
-        history_container = QWidget()
-        history_container.setStyleSheet(f"background: {BG};")
-        history_container.setLayout(self.history_list)
-        scroll.setWidget(history_container)
-        root.addWidget(scroll, 1)
+        container = QWidget()
+        container.setStyleSheet("background: #f7f5ef;")
+        container.setLayout(self.history_list)
+        scroll.setWidget(container)
+        main.addWidget(scroll, 1)
 
-        bottom = QHBoxLayout()
-        autosave = QLabel(f'<span style="color:{SUCCESS};">●</span> <span style="color:{MUTED};">auto-saving to voiceflow_log.txt</span>')
-        autosave.setFont(app_font(9))
-        settings = QPushButton("settings ↗")
-        settings.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        side = QVBoxLayout()
+        side.setSpacing(16)
+        shell.addLayout(side)
+        scratch = QFrame()
+        scratch.setFixedWidth(260)
+        scratch.setStyleSheet("QFrame { background: #ffffff; border: 1px solid #e8e2d8; border-radius: 16px; }")
+        scratch_layout = QVBoxLayout(scratch)
+        scratch_layout.setContentsMargins(18, 18, 18, 18)
+        scratch_title = QLabel("Scratchpad")
+        scratch_title.setFont(app_font(15, QFont.Weight.Bold))
+        scratch_text = QTextEdit()
+        scratch_text.setPlaceholderText("Quick notes while dictating...")
+        scratch_text.setFixedHeight(150)
+        scratch_text.setStyleSheet("QTextEdit { background: #fbfaf7; color: #222222; border: 1px solid #ece5d8; border-radius: 8px; padding: 10px; }")
+        scratch_layout.addWidget(scratch_title)
+        scratch_layout.addWidget(scratch_text)
+        side.addWidget(scratch)
+
+        quick = QFrame()
+        quick.setFixedWidth(260)
+        quick.setStyleSheet("QFrame { background: #ffffff; border: 1px solid #e8e2d8; border-radius: 16px; }")
+        quick_layout = QVBoxLayout(quick)
+        quick_layout.setContentsMargins(18, 18, 18, 18)
+        quick_title = QLabel("Quick actions")
+        quick_title.setFont(app_font(15, QFont.Weight.Bold))
+        settings = QPushButton("Open settings")
         settings.clicked.connect(self.settings_requested)
-        settings.setStyleSheet(
-            f"QPushButton {{ background: transparent; color: {TEXT}; border: 1px solid #545463; border-radius: 8px; padding: 7px 13px; font-weight: 700; }}"
-            f"QPushButton:hover {{ border-color: {ACCENT}; }}"
-        )
-        bottom.addWidget(autosave)
-        bottom.addStretch()
-        bottom.addWidget(settings)
-        root.addLayout(bottom)
+        copy_last = QPushButton("Copy current text")
+        copy_last.clicked.connect(lambda: self.copy_requested.emit(self.live_box.text()))
+        for button in (settings, copy_last):
+            button.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+            button.setStyleSheet("QPushButton { background: #191919; color: #ffffff; border: none; border-radius: 8px; padding: 10px 12px; font-weight: 700; text-align: left; } QPushButton:hover { background: #2a2a2a; }")
+        quick_layout.addWidget(quick_title)
+        quick_layout.addWidget(settings)
+        quick_layout.addWidget(copy_last)
+        side.addWidget(quick)
+        side.addStretch()
 
     def set_state(self, state: str):
         self.current_state = state
@@ -557,9 +729,8 @@ class VoiceFlowWindow(QWidget):
     def add_history_entry(self, entry: Dict):
         widget = HistoryEntry(entry)
         widget.selected.connect(self.history_selected)
-        widget.copy_requested.connect(self.copy_requested)
         self.history_list.insertWidget(0, widget)
-        while self.history_list.count() > 51:  # 50 entries plus stretch
+        while self.history_list.count() > 51:
             item = self.history_list.takeAt(50)
             if item and item.widget():
                 item.widget().deleteLater()
@@ -569,13 +740,16 @@ class VoiceFlowWindow(QWidget):
             item = self.history_list.takeAt(0)
             if item and item.widget():
                 item.widget().deleteLater()
-        for entry in reversed(entries[:50]):
-            self.add_history_entry(entry)
+        newest_first = list(reversed(entries))[:50]
+        for entry in newest_first:
+            widget = HistoryEntry(entry)
+            widget.selected.connect(self.history_selected)
+            self.history_list.insertWidget(self.history_list.count() - 1, widget)
 
     def show_near_tray(self, activate: bool = False):
         screen = QApplication.primaryScreen().availableGeometry()
-        x = screen.right() - self.width() - 18
-        y = screen.bottom() - self.height() - 18
+        x = screen.left() + (screen.width() - self.width()) // 2
+        y = screen.top() + (screen.height() - self.height()) // 2
         self.move(QPoint(max(screen.left(), x), max(screen.top(), y)))
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, not activate)
         self.show()
@@ -583,13 +757,8 @@ class VoiceFlowWindow(QWidget):
         if activate:
             self.activateWindow()
 
-    def changeEvent(self, event):  # noqa: N802 - Qt override
-        if (
-            event.type() == QEvent.Type.ActivationChange
-            and self.isVisible()
-            and not self.isActiveWindow()
-            and self.current_state == "idle"
-        ):
+    def changeEvent(self, event):  # noqa: N802
+        if event.type() == QEvent.Type.ActivationChange and self.isVisible() and not self.isActiveWindow() and self.current_state == "idle":
             self.hide()
         super().changeEvent(event)
 
@@ -598,54 +767,55 @@ class TrayController:
     def __init__(self, window: VoiceFlowWindow, on_quit: Callable[[], None]):
         self.window = window
         self.on_quit = on_quit
+        self.floating = FloatingBar()
+        self.floating.clicked.connect(self.show_full_window)
         self.tray_icon = QSystemTrayIcon()
+        self._logo_icon = app_logo_icon()
         self.tray_icon.setIcon(self._icon("idle"))
         self.tray_icon.setToolTip("VoiceFlow Local - Ready")
         self.tray_icon.activated.connect(self._activated)
         self.tray_icon.show()
+        self.floating.show_center_top()
 
     def _activated(self, reason):
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
             if self.window.isVisible():
-                self.window.hide()
+                self.show_floating()
             else:
-                self.window.show_near_tray(activate=True)
+                self.show_full_window()
 
     def set_state(self, state: str):
         self.tray_icon.setIcon(self._icon(state))
-        tips = {
-            "idle": "VoiceFlow Local - Ready",
-            "recording": "VoiceFlow Local - Recording",
-            "processing": "VoiceFlow Local - Transcribing",
-            "error": "VoiceFlow Local - Error",
-        }
-        self.tray_icon.setToolTip(tips.get(state, "VoiceFlow Local"))
+        self.floating.set_state(state)
+
+    def set_level(self, level: float):
+        self.floating.set_level(level)
+
+    def show_full_window(self):
+        self.floating.hide()
+        self.window.show_near_tray(activate=True)
+
+    def show_floating(self):
+        self.window.hide()
+        self.floating.show_center_top()
 
     def notify(self, message: str, duration: int = 3000):
         self.tray_icon.showMessage("VoiceFlow", message, QSystemTrayIcon.MessageIcon.Information, duration)
 
     def _icon(self, state: str) -> QIcon:
-        colors = {
-            "idle": QColor(ACCENT),
-            "recording": QColor(RECORDING),
-            "processing": QColor(PROCESSING),
-            "error": QColor("#B71C1C"),
-        }
+        if not self._logo_icon.isNull():
+            return self._logo_icon
+        color = {"idle": PRIMARY, "recording": RECORDING_DEEP, "processing": PROCESSING, "error": "#b71c1c"}.get(state, PRIMARY)
         pixmap = QPixmap(QSize(32, 32))
         pixmap.fill(Qt.GlobalColor.transparent)
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setBrush(colors.get(state, QColor(ACCENT)))
-        painter.setPen(QPen(QColor("#ffffff"), 2))
-        painter.drawEllipse(5, 5, 22, 22)
-        if state == "recording":
-            painter.setBrush(QColor("#ffffff"))
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawEllipse(13, 13, 6, 6)
-        elif state == "processing":
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.setPen(QPen(QColor("#ffffff"), 3))
-            painter.drawArc(8, 8, 16, 16, 0, 270 * 16)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(color))
+        painter.drawRoundedRect(4, 4, 24, 24, 6, 6)
+        painter.setBrush(QColor("#dce9ff"))
+        painter.drawRoundedRect(11, 9, 3, 14, 1.5, 1.5)
+        painter.drawRoundedRect(18, 9, 3, 14, 1.5, 1.5)
         painter.end()
         return QIcon(pixmap)
 
