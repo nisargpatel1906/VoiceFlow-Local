@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
 import pyperclip
-from PyQt6.QtCore import QByteArray, QEasingCurve, QEvent, QPoint, QPropertyAnimation, QRectF, QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QByteArray, QEasingCurve, QEvent, QPoint, QPropertyAnimation, QRectF, QSize, Qt, QTimer, pyqtProperty, pyqtSignal
 from PyQt6.QtGui import QColor, QCursor, QFont, QIcon, QPainter, QPen, QPixmap
 from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtWidgets import QApplication, QFrame, QGraphicsDropShadowEffect, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSystemTrayIcon, QTextEdit, QToolButton, QVBoxLayout, QWidget
@@ -61,6 +61,20 @@ def app_logo_icon() -> QIcon:
     if logo_path.exists():
         return QIcon(str(logo_path))
     return QIcon()
+
+
+def format_hotkey_text(value: str) -> str:
+    parts = [part.strip() for part in value.replace("-", "+").split("+") if part.strip()]
+    names = {
+        "ctrl": "Ctrl",
+        "control": "Ctrl",
+        "alt": "Alt",
+        "shift": "Shift",
+        "windows": "Win",
+        "win": "Win",
+        "space": "Space",
+    }
+    return " + ".join(names.get(part.lower(), part.upper() if len(part) == 1 else part.title()) for part in parts)
 
 
 class LogoMark(QWidget):
@@ -152,19 +166,8 @@ class HotkeyDisplay(QWidget):
                 item.widget().deleteLater()
         self.badges = []
         hotkey_parts = config.HOTKEY.replace("-", "+").split("+")
-        names = {
-            "ctrl": "Ctrl",
-            "control": "Ctrl",
-            "alt": "Alt",
-            "shift": "Shift",
-            "windows": "Win",
-            "win": "Win",
-            "space": "Space",
-        }
         for part in hotkey_parts:
-            part_lower = part.strip().lower()
-            display_name = names.get(part_lower, part.strip().upper() if len(part.strip()) == 1 else part.strip().title())
-            badge = KeyBadge(display_name)
+            badge = KeyBadge(format_hotkey_text(part))
             self.badges.append(badge)
             self.layout.addWidget(badge)
 
@@ -177,8 +180,7 @@ class MicButton(QToolButton):
     def __init__(self):
         super().__init__()
         self.setFixedSize(104, 92)
-        hotkey_tip = config.HOTKEY.replace("+", "+").title()
-        self.setToolTip(f"Hold {hotkey_tip} to start")
+        self.refresh_hotkey_text()
         self.state = "ready"
         self._radius = 32.0
         self._svg = QSvgRenderer(QByteArray(MIC_SVG.encode("utf-8")))
@@ -196,7 +198,7 @@ class MicButton(QToolButton):
         self._radius = value
         self.update()
 
-    pulseRadius = property(get_pulse_radius, set_pulse_radius)
+    pulseRadius = pyqtProperty(float, fget=get_pulse_radius, fset=set_pulse_radius)
 
     def set_state(self, state: str):
         self.state = state
@@ -206,6 +208,9 @@ class MicButton(QToolButton):
             self._anim.stop()
             self._radius = 32.0
         self.update()
+
+    def refresh_hotkey_text(self):
+        self.setToolTip(f"Hold {format_hotkey_text(config.HOTKEY)} to start")
 
     def paintEvent(self, event):  # noqa: N802
         painter = QPainter(self)
@@ -311,11 +316,12 @@ class FloatingBar(QWidget):
         self._position_lock.timeout.connect(self._enforce_anchor)
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._tick)
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(24)
-        shadow.setOffset(0, 4)
-        shadow.setColor(QColor(0, 0, 0, 165))
-        self.setGraphicsEffect(shadow)
+        if sys.platform != "win32":
+            shadow = QGraphicsDropShadowEffect(self)
+            shadow.setBlurRadius(24)
+            shadow.setOffset(0, 4)
+            shadow.setColor(QColor(0, 0, 0, 165))
+            self.setGraphicsEffect(shadow)
         self._apply_size()
 
     def mouseDoubleClickEvent(self, event):  # noqa: N802
@@ -403,18 +409,7 @@ class FloatingBar(QWidget):
             return
         self._repositioning = True
         try:
-            if sys.platform == "win32" and int(self.winId()):
-                ctypes.windll.user32.SetWindowPos(
-                    int(self.winId()),
-                    HWND_TOPMOST,
-                    target.x(),
-                    target.y(),
-                    0,
-                    0,
-                    SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOSENDCHANGING,
-                )
-            else:
-                self.move(target)
+            self.move(target)
         finally:
             self._repositioning = False
 
@@ -463,7 +458,7 @@ class FloatingBar(QWidget):
             painter.drawText(QRectF(32, 2, 78, 54), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, "Click or hold")
             painter.setPen(QColor("#ff9be7"))
             painter.setFont(app_font(10, QFont.Weight.Bold))
-            hotkey_display = config.HOTKEY.replace("+", " + ").title()
+            hotkey_display = format_hotkey_text(config.HOTKEY)
             painter.drawText(QRectF(112, 2, 88, 54), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, hotkey_display)
             painter.setPen(QColor("#ffffff"))
             painter.setFont(app_font(10, QFont.Weight.Medium))
@@ -631,6 +626,7 @@ class VoiceFlowWindow(QWidget):
         self.history_list.setContentsMargins(0, 0, 0, 0)
         self.history_list.setSpacing(7)
         self.history_list.addStretch()
+        self.greeting_row = None
         self.live_box.copy_requested.connect(self.copy_requested)
         self._build()
 
@@ -649,32 +645,12 @@ class VoiceFlowWindow(QWidget):
         shell.addLayout(main, 1)
 
         greeting_row = QHBoxLayout()
+        self.greeting_row = greeting_row
         greeting = QLabel("Hey Nisarg, get back into the flow with")
         greeting.setFont(app_font(17, QFont.Weight.Bold))
         greeting.setStyleSheet("color: #151515; background: transparent;")
         greeting_row.addWidget(greeting)
-        hotkey_parts = config.HOTKEY.replace("-", "+").split("+")
-        names = {
-            "ctrl": "Ctrl",
-            "control": "Ctrl",
-            "alt": "Alt",
-            "shift": "Shift",
-            "windows": "Win",
-            "win": "Win",
-            "space": "Space",
-        }
-        for index, part in enumerate(hotkey_parts):
-            part_lower = part.strip().lower()
-            display_name = names.get(part_lower, part.strip().upper() if len(part.strip()) == 1 else part.strip().title())
-            chip = QLabel(display_name)
-            chip.setFont(app_font(13, QFont.Weight.Bold))
-            chip.setStyleSheet("background: #ffae43; color: #17120a; border: 1px solid #a65f12; border-radius: 5px; padding: 6px 9px;")
-            greeting_row.addWidget(chip)
-            if index < len(hotkey_parts) - 1:
-                plus = QLabel("+")
-                plus.setFont(app_font(16, QFont.Weight.Bold))
-                plus.setStyleSheet("color: #151515; background: transparent;")
-                greeting_row.addWidget(plus)
+        self._populate_greeting_hotkey()
         greeting_row.addStretch()
         main.addLayout(greeting_row)
 
@@ -800,7 +776,30 @@ class VoiceFlowWindow(QWidget):
 
     def refresh_hotkey_display(self):
         self.hotkey._update_badges()
+        self.mic.refresh_hotkey_text()
+        self._populate_greeting_hotkey()
         self.update()
+
+    def _populate_greeting_hotkey(self):
+        if self.greeting_row is None:
+            return
+        while self.greeting_row.count() > 1:
+            item = self.greeting_row.takeAt(1)
+            if item and item.widget():
+                item.widget().deleteLater()
+
+        hotkey_parts = [part.strip() for part in config.HOTKEY.replace("-", "+").split("+") if part.strip()]
+        for index, part in enumerate(hotkey_parts):
+            chip = QLabel(format_hotkey_text(part))
+            chip.setFont(app_font(13, QFont.Weight.Bold))
+            chip.setStyleSheet("background: #ffae43; color: #17120a; border: 1px solid #a65f12; border-radius: 5px; padding: 6px 9px;")
+            self.greeting_row.addWidget(chip)
+            if index < len(hotkey_parts) - 1:
+                plus = QLabel("+")
+                plus.setFont(app_font(16, QFont.Weight.Bold))
+                plus.setStyleSheet("color: #151515; background: transparent;")
+                self.greeting_row.addWidget(plus)
+        self.greeting_row.addStretch()
 
     def update_level(self, level: float):
         self.waveform.set_level(level)

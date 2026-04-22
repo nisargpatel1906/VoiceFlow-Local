@@ -14,8 +14,8 @@ TOGGLE_MODE = False
 MODEL_SIZE = 'medium'
 DEVICE = 'cuda'
 COMPUTE_TYPE = 'float16'
-LANGUAGE = 'gu'
-LANGUAGE_CHOICE = 'gujarati'
+LANGUAGE = None
+LANGUAGE_CHOICE = 'auto detect'
 BEAM_SIZE = 5
 PRELOAD_MODEL_ON_START = False
 

@@ -19,6 +19,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List
 
+# We MUST import torch / faster_whisper before PyQt6 or we encounter a silent failure
+# down the line when starting a streaming dictation thread with CUDA enabled.
+try:
+    import torch
+    import faster_whisper
+except ImportError:
+    pass
+
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication
@@ -125,7 +133,8 @@ class VoiceFlowApp(QObject):
         self.transcription_signals = TranscriptionSignals()
         self.stream_recorder = StreamingRecorder()
         self.stream_transcriber = StreamingTranscriber(config)
-        self.chunk_queue: "queue.Queue[str | None]" = queue.Queue()
+        self.stream_transcriber.error_ready.connect(self._on_streaming_error)
+        self.chunk_queue: "queue.Queue[str | None]" = queue.Queue(maxsize=3)
         self.recording_started_at = 0.0
 
         self.window.set_history(self.history.entries)
@@ -164,7 +173,7 @@ class VoiceFlowApp(QObject):
         self.is_recording = True
         self.is_processing = False
         self.recording_started_at = time.time()
-        self.chunk_queue = queue.Queue()
+        self.chunk_queue = queue.Queue(maxsize=3)
         self.stream_transcriber.reset()
         self.window.update_live_text("")
         self.window.set_hotkey_active(True)
@@ -234,6 +243,10 @@ class VoiceFlowApp(QObject):
     def _on_final_received(self, raw_text: str):
         duration_sec = max(0.0, time.time() - self.recording_started_at) if self.recording_started_at else 0.0
         self._finalize_transcript(raw_text, duration_sec)
+
+    @pyqtSlot(str)
+    def _on_streaming_error(self, message: str):
+        self.logger.warning(f"Streaming chunk skipped: {message}")
 
     @pyqtSlot(str)
     def _on_worker_error(self, message: str):
@@ -328,6 +341,7 @@ class VoiceFlowApp(QObject):
         importlib.reload(config)
         self.cleaner = TextCleaner()
         self.stream_transcriber = StreamingTranscriber(config)
+        self.stream_transcriber.error_ready.connect(self._on_streaming_error)
         self.history.path = config.LOG_FILE
         self.history.limit = config.HISTORY_LIMIT
         self.history.load()

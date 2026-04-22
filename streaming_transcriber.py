@@ -24,6 +24,7 @@ from streaming_recorder import StreamingRecorder
 class StreamingTranscriber(QObject):
     partial_ready = pyqtSignal(str)
     final_ready = pyqtSignal(str)
+    error_ready = pyqtSignal(str)
 
     def __init__(self, config_module=None):
         super().__init__()
@@ -42,6 +43,7 @@ class StreamingTranscriber(QObject):
         self.beam_size = 3
         self.vad_filter = True
         self.running_transcript = ""
+        self.detected_language = getattr(self.config, "LANGUAGE", None)
         self._model_loaded = False
         self._consumer_thread: Optional[threading.Thread] = None
         self._cleanup_helper = StreamingRecorder()
@@ -70,12 +72,27 @@ class StreamingTranscriber(QObject):
         if not os.path.exists(wav_path):
             return ""
 
-        segments, _ = self.model.transcribe(
-            wav_path,
-            language=getattr(self.config, "LANGUAGE", None),
-            beam_size=self.beam_size,
-            vad_filter=self.vad_filter,
-        )
+        transcribe_kwargs = {
+            "beam_size": self.beam_size,
+            "vad_filter": self.vad_filter,
+            "condition_on_previous_text": False,
+            "without_timestamps": True,
+        }
+        if self.detected_language:
+            transcribe_kwargs["language"] = self.detected_language
+
+        try:
+            segments, info = self.model.transcribe(wav_path, **transcribe_kwargs)
+        except ValueError as exc:
+            if "empty sequence" in str(exc).lower():
+                return ""
+            raise
+
+        if not self.detected_language:
+            detected = getattr(info, "language", None)
+            if detected:
+                self.detected_language = detected
+
         chunk_text = " ".join(segment.text for segment in segments).strip()
         if self.cleaner.is_duplicate_of_previous(chunk_text, self.running_transcript):
             return ""
@@ -83,6 +100,7 @@ class StreamingTranscriber(QObject):
 
     def reset(self):
         self.running_transcript = ""
+        self.detected_language = getattr(self.config, "LANGUAGE", None)
 
     def _consume_queue(self, chunk_queue: "queue.Queue[Optional[str]]"):
         while True:
@@ -91,8 +109,31 @@ class StreamingTranscriber(QObject):
                 self.final_ready.emit(self.running_transcript.strip())
                 break
 
+            finish_after_chunk = False
+            stale_paths = []
+            while True:
+                try:
+                    queued_item = chunk_queue.get_nowait()
+                except queue.Empty:
+                    break
+
+                if queued_item is None:
+                    finish_after_chunk = True
+                    break
+
+                stale_paths.append(chunk_path)
+                chunk_path = queued_item
+
+            for stale_path in stale_paths:
+                self._cleanup_helper.cleanup(stale_path)
+
             try:
-                partial_text = self.transcribe_chunk(chunk_path)
+                try:
+                    partial_text = self.transcribe_chunk(chunk_path)
+                except Exception as exc:
+                    print(f"[ERROR] Streaming chunk transcription failed: {exc}")
+                    self.error_ready.emit(str(exc))
+                    partial_text = ""
                 if partial_text:
                     if self.running_transcript:
                         self.running_transcript = f"{self.running_transcript} {partial_text}".strip()
@@ -101,6 +142,10 @@ class StreamingTranscriber(QObject):
                     self.partial_ready.emit(self.running_transcript)
             finally:
                 self._cleanup_helper.cleanup(chunk_path)
+
+            if finish_after_chunk:
+                self.final_ready.emit(self.running_transcript.strip())
+                break
 
     def _reset_signal(self, signal, callback: Callable[[str], None]):
         try:

@@ -24,6 +24,7 @@ class StreamingRecorder:
     FORMAT = pyaudio.paInt16
     SAMPLE_WIDTH = 2
     CHUNK_DURATION_MS = 500 if sys.platform == "win32" else 2500 if sys.platform == "darwin" else 500
+    SNAPSHOT_WINDOW_MS = 2000 if sys.platform == "win32" else 5000 if sys.platform == "darwin" else 2000
     ROLLING_BUFFER_SECONDS = 30
 
     def __init__(self):
@@ -39,6 +40,7 @@ class StreamingRecorder:
         self._sentinel_sent = False
         self._sentinel_lock = threading.Lock()
         self._last_error: Optional[str] = None
+        self._snapshot_window_bytes = int(self.SAMPLE_RATE * self.SAMPLE_WIDTH * self.SNAPSHOT_WINDOW_MS / 1000)
 
     def start(self, chunk_queue: "queue.Queue[Optional[str]]"):
         if self._thread and self._thread.is_alive():
@@ -121,9 +123,10 @@ class StreamingRecorder:
                 wav_path = tempfile.mktemp(suffix=".wav")
 
                 try:
-                    self._write_chunk_wav(wav_path, chunk)
+                    snapshot = self._current_snapshot()
+                    self._write_chunk_wav(wav_path, snapshot)
                     if self.chunk_queue is not None:
-                        self.chunk_queue.put(wav_path)
+                        self._put_chunk_path(wav_path)
                 except Exception as exc:
                     self._last_error = f"Failed to write streaming chunk WAV: {exc}"
                     print(f"[ERROR] {self._last_error}")
@@ -140,6 +143,32 @@ class StreamingRecorder:
                 overflow = len(self._rolling_buffer) - self._max_buffer_bytes
                 del self._rolling_buffer[:overflow]
 
+    def _current_snapshot(self) -> bytes:
+        with self._buffer_lock:
+            if len(self._rolling_buffer) <= self._snapshot_window_bytes:
+                return bytes(self._rolling_buffer)
+            return bytes(self._rolling_buffer[-self._snapshot_window_bytes :])
+
+    def _put_chunk_path(self, wav_path: str):
+        if self.chunk_queue is None:
+            return
+
+        try:
+            self.chunk_queue.put_nowait(wav_path)
+            return
+        except queue.Full:
+            pass
+
+        try:
+            dropped = self.chunk_queue.get_nowait()
+        except queue.Empty:
+            dropped = None
+
+        if isinstance(dropped, str):
+            self.cleanup(dropped)
+
+        self.chunk_queue.put_nowait(wav_path)
+
     def _write_chunk_wav(self, path: str, audio_bytes: bytes):
         with wave.open(path, "wb") as wav_file:
             wav_file.setnchannels(self.CHANNELS)
@@ -154,7 +183,17 @@ class StreamingRecorder:
             self._sentinel_sent = True
 
         if self.chunk_queue is not None:
-            self.chunk_queue.put(None)
+            while True:
+                try:
+                    self.chunk_queue.put_nowait(None)
+                    break
+                except queue.Full:
+                    try:
+                        dropped = self.chunk_queue.get_nowait()
+                    except queue.Empty:
+                        break
+                    if isinstance(dropped, str):
+                        self.cleanup(dropped)
 
     def _close_stream(self):
         if self.stream is not None:
