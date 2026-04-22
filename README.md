@@ -1,134 +1,257 @@
 <p align="center">
-  <img src="logo.png" width="150" alt="VoiceFlow Local Logo">
+  <img src="logo.png" width="140" alt="VoiceFlow Local logo">
 </p>
 
-# VoiceFlow Local (v2.5)
+# VoiceFlow Local
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey.svg)](https://www.microsoft.com/windows/)
+Local voice dictation with a floating UI, live preview, final paste-on-release, history, and a settings panel. The app is built with PyQt6 and runs fully on-device with Whisper via `faster-whisper`.
 
-**VoiceFlow Local** is a high-performance, privacy-focused voice dictation application for Windows. Version 2.5 introduces a complete architectural overhaul, moving from batch processing to **Real-time Streaming Dictation**. Powered by OpenAI's Whisper (via `faster-whisper`), it allows you to dictate text anywhere on your system with zero cloud dependency.
+## What it does
 
----
+- Global dictation hotkey: `Ctrl+Space`
+- Global quit hotkey: `Ctrl+Q`
+- Floating bottom bar plus full desktop window
+- Live transcription preview while you speak
+- Final higher-accuracy transcription on release
+- Direct paste into the last focused app
+- Local history in `voiceflow_log.txt`
+- Text cleanup:
+  - filler removal
+  - self-correction cleanup
+  - auto-capitalization
+  - voice commands
+- Optional translate-to-English mode
 
-## New in Version 2.5
+## Current platform support
 
-- **Real-time Streaming**: See your words appear as you speak with a new low-latency streaming engine.
-- **Voice Commands**: Control formatting with commands like "new line", "period", "comma", and "delete that".
-- **Intelligent Text Cleaning**: Advanced algorithms automatically remove filler words ("um", "uh"), fix self-corrections ("no wait..."), and deduplicate speech artifacts.
-- **Flexible Dictation**: Support for both "Push-to-Talk" and "Toggle" modes.
-- **Translation Support**: Live translation from any language to English.
+### Windows
 
----
+Windows is the primary path.
 
-## Core Features
+- Global hotkeys use `keyboard`
+- Text injection uses `Ctrl+V`
+- `faster-whisper` uses CUDA when available
+- One-click launcher: `start.bat`
+- Installer: `install.bat`
 
-- **Lightning Fast**: Optimized CTranslate2 inference using `faster-whisper`.
-- **Privacy First**: 100% local processing. Your audio never leaves your machine.
-- **Direct Injection**: Transcribed text is automatically typed at your cursor position in any application.
-- **Customizable Models**: Choose between `tiny`, `base`, `small`, `medium`, and `large-v3` based on your hardware.
-- **Enhanced History**: Search and manage your session history with character counts and duration tracking.
-- **Modern UI**: Sleek dark-mode interface with real-time waveform visualization and live text feedback.
+### macOS
 
----
+macOS support uses the same codebase, but not the same acceleration path.
 
-## Architecture
+- Global hotkeys use `pynput`
+- Text injection uses `Cmd+V`
+- One-click launchers:
+  - `start_mac.command`
+  - `start.command`
+- `faster-whisper` runs on **CPU/int8** on macOS in this project
 
-VoiceFlow Local 2.5 utilizes a sophisticated multi-threaded system:
-- **StreamingRecorder**: High-performance audio capture with chunked buffering.
-- **StreamingTranscriber**: Asynchronous Whisper inference for non-blocking UI updates.
-- **TextCleaner**: Multi-stage processing pipeline for polished, human-like text output.
-- **PyQt6 Interface**: Hardware-accelerated GUI for system tray and settings management.
+Important: this codebase does **not** use CUDA on Mac.
 
----
+Reason:
+- PyTorch supports `mps` on Apple Silicon
+- but this app uses `faster-whisper`, which runs on CTranslate2
+- CTranslate2 prebuilt GPU support is NVIDIA-only, so the practical path here is CPU on Mac
 
-## Getting Started
+## Requirements
 
-### Prerequisites
+### Common
 
-- **OS**: Windows 10/11
-- **Python**: 3.10 recommended (the installer targets `py -3.10`)
-- **GPU**: NVIDIA GPU with CUDA support is highly recommended for the streaming engine.
+- Python 3.10+
+- microphone access
+- internet on first model download
 
-### Installation
+### Windows
 
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/nisargpatel1906/VoiceFlow-Local.git
-   cd voiceflow-local
-   ```
+- Windows 10 or 11
+- Python Launcher available as `py`
+- NVIDIA GPU recommended for best live performance
 
-2. **Run the Installer**:
-   Double-click `install.bat`. This will set up the virtual environment, install dependencies, and download the default model.
+### macOS
 
----
+- macOS with Python 3.10+
+- Accessibility permission for the terminal or app runner
+- microphone permission
 
-## Usage Guide
+## Install
 
-1. **Launch**: Run `start.bat`. A microphone icon will appear in your System Tray.
-2. **Setup Focus**: Click into any text field (VS Code, Browser, Word, etc.).
-3. **Dictate**: Press and hold **`Ctrl + Space`** (default).
-   - The tray icon turns **red**.
-   - A **live overlay** shows your text appearing in real-time.
-4. **Voice Commands**: While speaking, use commands like:
-   - "Comma", "Period", "Question Mark" for punctuation.
-   - "New line" or "New paragraph" for structure.
-   - "Delete that" to instantly cancel the current phrase.
-5. **Release**: Let go of the hotkey. The final, polished text is injected at your cursor.
+### Windows install
 
----
+Use the provided installer:
 
-## Voice Commands Reference
+```bat
+install.bat
+```
 
-| Command | Action |
-|---------|--------|
-| `period` / `full stop` | Inserts `.` |
-| `comma` | Inserts `,` |
-| `new line` | Inserts a line break |
-| `new paragraph` | Inserts two line breaks |
-| `delete that` | Cancels the current transcription |
-| `question mark` | Inserts `?` |
+That script:
+- creates `venv`
+- installs dependencies
+- downloads the default Whisper model
 
----
+### macOS install
 
-## Configuration
+There is no separate Mac installer script in the repo yet. Use a normal venv setup:
 
-Settings can be adjusted via the **Settings Window** or in `config.py`:
+```bash
+python3 -m venv venv
+source venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+chmod +x start.command start_mac.command
+```
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `HOTKEY` | `ctrl+space` | Trigger for dictation. |
-| `MODEL_SIZE`| `medium` | Whisper model accuracy level. |
-| `TOGGLE_MODE`| `False` | Switch between push-to-talk and toggle behavior. |
-| `REMOVE_FILLERS`| `True` | Strips "um", "uh", "like" from output. |
-| `AUTO_CAPITALIZE`| `True` | Automatically formats sentence starts. |
-| `TRANSLATE` | `False` | Translates incoming speech to English. |
+If you want the model downloaded before first launch:
 
----
+```bash
+python -c "import config; from faster_whisper import WhisperModel; WhisperModel(config.MODEL_SIZE, download_root='models')"
+```
 
-## Contributing
+## Run
 
-Contributions are welcome! Please open an issue or submit a pull request for any features or bug fixes.
+### Windows
 
-1. Fork the Project
-2. Create your Feature Branch (`git checkout -b feature/NewFeature`)
-3. Commit your Changes (`git commit -m 'Add NewFeature'`)
-4. Push to the Branch (`git push origin feature/NewFeature`)
-5. Open a Pull Request
+```bat
+start.bat
+```
 
----
+This launches the app hidden in the background with the floating UI.
+
+### macOS
+
+Use either:
+
+```bash
+./start_mac.command
+```
+
+or:
+
+```bash
+./start.command
+```
+
+## First-run OS permissions
+
+### Windows
+
+- Microphone access must be enabled
+- If suppressed hotkeys behave inconsistently on your setup, run with appropriate permissions
+
+### macOS
+
+You must allow:
+
+- Accessibility
+- Microphone
+
+Without Accessibility permission:
+- global hotkeys will not work correctly
+- paste injection will not work correctly
+
+## Hotkeys
+
+Default hotkeys:
+
+- Dictate: `Ctrl+Space`
+- Quit app: `Ctrl+Q`
+
+These can be changed from the settings panel. When changed, the visible hotkey labels in the UI update too.
+
+## How dictation works
+
+Current flow:
+
+1. Hold `Ctrl+Space`
+2. Audio is captured in streaming chunks
+3. Live text preview updates in the UI
+4. Release hotkey
+5. The app runs a final transcription pass on the full rolling buffer
+6. Cleaned text is pasted into the previously focused app
+7. History is saved locally if auto-save is enabled
+
+## Settings
+
+The settings window supports:
+
+- hotkey recording
+- toggle mode
+- model selection
+- compute type
+- language selection
+- beam size
+- translate-to-English toggle
+- filler word cleanup
+- self-correction cleanup
+- auto-capitalization
+- voice commands
+- auto-save
+- log format
+- history limit
+- start with Windows / start at login
+- notifications
+- silence threshold
+- debug mode
+
+Settings are written back to `config.py`.
+
+## Files of interest
+
+- `main.py` - app entrypoint and runtime orchestration
+- `voiceflow_ui.py` - floating UI, main window, tray controller
+- `gui/settings_window.py` - settings panel
+- `hotkey.py` - Windows and macOS hotkey backends
+- `streaming_recorder.py` - chunked mic capture
+- `streaming_transcriber.py` - live Whisper consumer
+- `transcriber.py` - fallback/final transcription path
+- `cleaner.py` - text cleanup and chunk dedupe
+- `config.py` - generated runtime settings
+- `start.bat` - Windows launcher
+- `start.command` / `start_mac.command` - macOS launchers
+
+## Audio / notification sounds
+
+The app uses local MP3 files from the repo folder:
+
+- `enter.mp3` - app-ready sound after startup
+- `sound.mp3` - transcription complete sound
+- `quite.mp3` - quit sound on `Ctrl+Q`
+
+Tray popup notifications are disabled by default in the current config.
+
+## Logging and history
+
+- runtime log: `voiceflow.log`
+- startup log: `voiceflow_start.log`
+- transcription history: `voiceflow_log.txt`
+
+History entries include:
+- text
+- date
+- time
+- character count
+- duration
+
+## Known limits
+
+- Windows is the best-supported runtime path
+- macOS currently uses CPU/int8 for Whisper in this codebase
+- `faster-whisper` on Mac is not using MPS in this project
+- macOS support is code-level integrated, but final validation still depends on real Mac testing
+
+## Development notes
+
+### Windows quick dev run
+
+```bat
+venv\Scripts\python.exe main.py --debug
+```
+
+### macOS quick dev run
+
+```bash
+source venv/bin/activate
+python main.py --debug
+```
 
 ## License
 
-Distributed under the MIT License. See `LICENSE` for more information.
-
----
-
-## Author
-
-**Nisarg Patel**
-- GitHub: [@nisargpatel1906](https://github.com/nisargpatel1906)
-
-*Revolutionizing local dictation*
-
+MIT. See [LICENSE](LICENSE).
