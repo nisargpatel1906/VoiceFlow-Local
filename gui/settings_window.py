@@ -49,7 +49,7 @@ SUCCESS = "#2E7D32"
 
 
 DEFAULT_CONFIG: Dict[str, Any] = {
-    "HOTKEY": "ctrl+windows",
+    "HOTKEY": "ctrl+space",
     "TOGGLE_MODE": False,
     "MODEL_SIZE": "medium",
     "DEVICE": "cuda",

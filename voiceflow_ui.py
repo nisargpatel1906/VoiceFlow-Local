@@ -16,6 +16,8 @@ from PyQt6.QtGui import QColor, QCursor, QFont, QIcon, QPainter, QPen, QPixmap
 from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtWidgets import QApplication, QFrame, QGraphicsDropShadowEffect, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSystemTrayIcon, QTextEdit, QToolButton, QVBoxLayout, QWidget
 
+import config
+
 if sys.platform == "win32":
     HWND_TOPMOST = -1
     SWP_NOSIZE = 0x0001
@@ -137,24 +139,46 @@ class KeyBadge(QLabel):
 class HotkeyDisplay(QWidget):
     def __init__(self):
         super().__init__()
-        self.ctrl = KeyBadge("Ctrl")
-        self.space = KeyBadge("Win")
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(5)
-        layout.addWidget(self.ctrl)
-        layout.addWidget(self.space)
+        self.layout = QHBoxLayout(self)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(5)
+        self.badges = []
+        self._update_badges()
+
+    def _update_badges(self):
+        while self.layout.count():
+            item = self.layout.takeAt(0)
+            if item and item.widget():
+                item.widget().deleteLater()
+        self.badges = []
+        hotkey_parts = config.HOTKEY.replace("-", "+").split("+")
+        names = {
+            "ctrl": "Ctrl",
+            "control": "Ctrl",
+            "alt": "Alt",
+            "shift": "Shift",
+            "windows": "Win",
+            "win": "Win",
+            "space": "Space",
+        }
+        for part in hotkey_parts:
+            part_lower = part.strip().lower()
+            display_name = names.get(part_lower, part.strip().upper() if len(part.strip()) == 1 else part.strip().title())
+            badge = KeyBadge(display_name)
+            self.badges.append(badge)
+            self.layout.addWidget(badge)
 
     def set_active(self, active: bool):
-        self.ctrl.set_active(active)
-        self.space.set_active(active)
+        for badge in self.badges:
+            badge.set_active(active)
 
 
 class MicButton(QToolButton):
     def __init__(self):
         super().__init__()
         self.setFixedSize(104, 92)
-        self.setToolTip("Hold Ctrl+Win to start")
+        hotkey_tip = config.HOTKEY.replace("+", "+").title()
+        self.setToolTip(f"Hold {hotkey_tip} to start")
         self.state = "ready"
         self._radius = 32.0
         self._svg = QSvgRenderer(QByteArray(MIC_SVG.encode("utf-8")))
@@ -204,15 +228,24 @@ class WaveformWidget(QWidget):
     def __init__(self):
         super().__init__()
         self.setFixedSize(70, 34)
-        self.recording = False
+        self.mode = "idle"
         self.level = 0.2
         self.phase = 0
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._tick)
 
     def set_recording(self, recording: bool):
-        self.recording = recording
+        self.mode = "recording" if recording else "idle"
         if recording:
+            self.timer.start(80)
+        else:
+            self.timer.stop()
+            self.level = 0.18
+        self.update()
+
+    def set_mode(self, mode: str):
+        self.mode = mode
+        if mode in ("recording", "processing"):
             self.timer.start(80)
         else:
             self.timer.stop()
@@ -231,10 +264,21 @@ class WaveformWidget(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("#9bc8ff" if self.recording else "#6f91bd"))
+        if self.mode == "recording":
+            color = QColor("#9bc8ff")
+        elif self.mode == "processing":
+            color = QColor("#f6b84a")
+        else:
+            color = QColor("#6f91bd")
+        painter.setBrush(color)
         base = [0.35, 0.65, 0.95, 0.55, 0.8, 0.42, 0.6]
         for index, scale in enumerate(base):
-            extra = 0.25 if self.recording and (index + self.phase) % 4 == 0 else 0
+            if self.mode == "recording":
+                extra = 0.25 if (index + self.phase) % 4 == 0 else 0
+            elif self.mode == "processing":
+                extra = 0.15 if (index + self.phase) % 3 == 0 else 0
+            else:
+                extra = 0
             height = 6 + (self.height() - 9) * min(1, self.level * scale + extra)
             x = 7 + index * 9
             y = (self.height() - height) / 2
@@ -261,7 +305,6 @@ class FloatingBar(QWidget):
         self.hovered = False
         self._anchor_center_x: Optional[int] = None
         self._anchor_bottom: Optional[int] = None
-        self._did_initial_reanchor = False
         self._repositioning = False
         self._position_lock = QTimer(self)
         self._position_lock.setInterval(40)
@@ -282,12 +325,12 @@ class FloatingBar(QWidget):
 
     def showEvent(self, event):  # noqa: N802
         super().showEvent(event)
-        self._move_to_anchor()
-        self._position_lock.start()
+        screen = QApplication.primaryScreen().availableGeometry()
+        self._set_anchor(screen)
+        # Defer first positioning until the native window is visible to avoid
+        # a one-time startup jump on Windows.
         QTimer.singleShot(0, self._move_to_anchor)
-        if not self._did_initial_reanchor:
-            self._did_initial_reanchor = True
-            self._schedule_initial_reanchor()
+        self._position_lock.start()
 
     def hideEvent(self, event):  # noqa: N802
         self._position_lock.stop()
@@ -331,9 +374,11 @@ class FloatingBar(QWidget):
     def show_center_top(self):
         screen = QApplication.primaryScreen().availableGeometry()
         self._set_anchor(screen)
-        self._move_to_anchor()
+        was_visible = self.isVisible()
         self.show()
         self.raise_()
+        if was_visible:
+            self._move_to_anchor()
 
     def _apply_size(self):
         if self.state == "idle" and self.hovered:
@@ -368,13 +413,10 @@ class FloatingBar(QWidget):
                     0,
                     SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOSENDCHANGING,
                 )
-            self.move(target)
+            else:
+                self.move(target)
         finally:
             self._repositioning = False
-
-    def _schedule_initial_reanchor(self):
-        for delay in (0, 120, 260, 420, 700, 1000, 1500):
-            QTimer.singleShot(delay, self._move_to_anchor)
 
     def _enforce_anchor(self):
         if not self.isVisible() or self._anchor_center_x is None or self._anchor_bottom is None:
@@ -421,7 +463,8 @@ class FloatingBar(QWidget):
             painter.drawText(QRectF(32, 2, 78, 54), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, "Click or hold")
             painter.setPen(QColor("#ff9be7"))
             painter.setFont(app_font(10, QFont.Weight.Bold))
-            painter.drawText(QRectF(112, 2, 76, 54), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, "Ctrl + Win")
+            hotkey_display = config.HOTKEY.replace("+", " + ").title()
+            painter.drawText(QRectF(112, 2, 88, 54), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, hotkey_display)
             painter.setPen(QColor("#ffffff"))
             painter.setFont(app_font(10, QFont.Weight.Medium))
             painter.drawText(QRectF(196, 2, 86, 54), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, "to dictate")
@@ -609,18 +652,29 @@ class VoiceFlowWindow(QWidget):
         greeting = QLabel("Hey Nisarg, get back into the flow with")
         greeting.setFont(app_font(17, QFont.Weight.Bold))
         greeting.setStyleSheet("color: #151515; background: transparent;")
-        ctrl = QLabel("Ctrl")
-        win = QLabel("Win")
-        for chip in (ctrl, win):
+        greeting_row.addWidget(greeting)
+        hotkey_parts = config.HOTKEY.replace("-", "+").split("+")
+        names = {
+            "ctrl": "Ctrl",
+            "control": "Ctrl",
+            "alt": "Alt",
+            "shift": "Shift",
+            "windows": "Win",
+            "win": "Win",
+            "space": "Space",
+        }
+        for index, part in enumerate(hotkey_parts):
+            part_lower = part.strip().lower()
+            display_name = names.get(part_lower, part.strip().upper() if len(part.strip()) == 1 else part.strip().title())
+            chip = QLabel(display_name)
             chip.setFont(app_font(13, QFont.Weight.Bold))
             chip.setStyleSheet("background: #ffae43; color: #17120a; border: 1px solid #a65f12; border-radius: 5px; padding: 6px 9px;")
-        plus = QLabel("+")
-        plus.setFont(app_font(16, QFont.Weight.Bold))
-        plus.setStyleSheet("color: #151515; background: transparent;")
-        greeting_row.addWidget(greeting)
-        greeting_row.addWidget(ctrl)
-        greeting_row.addWidget(plus)
-        greeting_row.addWidget(win)
+            greeting_row.addWidget(chip)
+            if index < len(hotkey_parts) - 1:
+                plus = QLabel("+")
+                plus.setFont(app_font(16, QFont.Weight.Bold))
+                plus.setStyleSheet("color: #151515; background: transparent;")
+                greeting_row.addWidget(plus)
         greeting_row.addStretch()
         main.addLayout(greeting_row)
 
@@ -739,17 +793,26 @@ class VoiceFlowWindow(QWidget):
         ui_state = "ready" if state == "idle" else state
         self.status.set_state(ui_state)
         self.mic.set_state(ui_state)
-        self.waveform.set_recording(ui_state == "recording")
-        self.live_box.set_live(ui_state == "recording")
+        self.waveform.set_mode(ui_state)
 
     def set_hotkey_active(self, active: bool):
         self.hotkey.set_active(active)
+
+    def refresh_hotkey_display(self):
+        self.hotkey._update_badges()
+        self.update()
 
     def update_level(self, level: float):
         self.waveform.set_level(level)
 
     def update_live_text(self, text: str):
         self.live_box.set_text(text)
+
+    def show_live_badge(self):
+        self.live_box.set_live(True)
+
+    def hide_live_badge(self):
+        self.live_box.set_live(False)
 
     def add_history_entry(self, entry: Dict):
         widget = HistoryEntry(entry)
@@ -857,7 +920,7 @@ def make_history_entry(text: str, duration_sec: float, created_at: Optional[date
         "text": text,
         "date": created_at.strftime("%Y-%m-%d"),
         "time": created_at.strftime("%H:%M:%S"),
-        "time_label": created_at.strftime("Today, %I:%M %p").replace(" 0", " "),
+        "time_label": created_at.strftime("%Y-%m-%d, %I:%M %p").replace(" 0", " "),
         "chars": len(text),
         "duration_sec": round(duration_sec, 2),
     }
