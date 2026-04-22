@@ -2,35 +2,44 @@
   <img src="logo.png" width="150" alt="VoiceFlow Local Logo">
 </p>
 
-# VoiceFlow Local
+# VoiceFlow Local (v2.5)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey.svg)](https://www.microsoft.com/windows/)
 
-**VoiceFlow Local** is a high-performance, privacy-focused voice dictation application for Windows. Powered by OpenAI's Whisper (via `faster-whisper`), it allows you to dictate text anywhere on your system with a simple hotkey, performing all transcription locally on your GPU/CPU.
+**VoiceFlow Local** is a high-performance, privacy-focused voice dictation application for Windows. Version 2.5 introduces a complete architectural overhaul, moving from batch processing to **Real-time Streaming Dictation**. Powered by OpenAI's Whisper (via `faster-whisper`), it allows you to dictate text anywhere on your system with zero cloud dependency.
 
 ---
 
-## Features
+## New in Version 2.5
 
-- **Lightning Fast**: Uses `faster-whisper` for optimized CTranslate2 inference.
-- **Privacy First**: No cloud APIs. Your voice never leaves your machine.
-- **Push-to-Talk**: Global hotkey (`Ctrl + Space` by default) for seamless dictation.
-- **Direct Injection**: Transcribed text is automatically typed at your cursor or copied to the clipboard.
-- **Customizable**: Adjustable model sizes (tiny to large-v3), filler word removal, and more.
-- **History**: Keep track of your previous dictations with a built-in session history.
-- **Sleek UI**: Minimalist system tray integration with real-time audio level visualization.
+- **Real-time Streaming**: See your words appear as you speak with a new low-latency streaming engine.
+- **Voice Commands**: Control formatting with commands like "new line", "period", "comma", and "delete that".
+- **Intelligent Text Cleaning**: Advanced algorithms automatically remove filler words ("um", "uh"), fix self-corrections ("no wait..."), and deduplicate speech artifacts.
+- **Flexible Dictation**: Support for both "Push-to-Talk" and "Toggle" modes.
+- **Translation Support**: Live translation from any language to English.
+
+---
+
+## Core Features
+
+- **Lightning Fast**: Optimized CTranslate2 inference using `faster-whisper`.
+- **Privacy First**: 100% local processing. Your audio never leaves your machine.
+- **Direct Injection**: Transcribed text is automatically typed at your cursor position in any application.
+- **Customizable Models**: Choose between `tiny`, `base`, `small`, `medium`, and `large-v3` based on your hardware.
+- **Enhanced History**: Search and manage your session history with character counts and duration tracking.
+- **Modern UI**: Sleek dark-mode interface with real-time waveform visualization and live text feedback.
 
 ---
 
 ## Architecture
 
-VoicesFlow Local is built with a robust, multi-threaded architecture:
-- **PyQt6**: Manages the system tray, UI windows, and event loop.
-- **Faster-Whisper**: High-efficiency ASR (Automatic Speech Recognition).
-- **PyAudio**: Low-latency audio capture.
-- **PyAutoGUI**: Handles simulated keyboard input for text injection.
+VoiceFlow Local 2.5 utilizes a sophisticated multi-threaded system:
+- **StreamingRecorder**: High-performance audio capture with chunked buffering.
+- **StreamingTranscriber**: Asynchronous Whisper inference for non-blocking UI updates.
+- **TextCleaner**: Multi-stage processing pipeline for polished, human-like text output.
+- **PyQt6 Interface**: Hardware-accelerated GUI for system tray and settings management.
 
 ---
 
@@ -39,8 +48,8 @@ VoicesFlow Local is built with a robust, multi-threaded architecture:
 ### Prerequisites
 
 - **OS**: Windows 10/11
-- **Python**: 3.10 recommended (the installer specifically looks for `py -3.10`)
-- **GPU (Optional)**: NVIDIA GPU with CUDA support is highly recommended for real-time performance.
+- **Python**: 3.10 recommended (the installer targets `py -3.10`)
+- **GPU**: NVIDIA GPU with CUDA support is highly recommended for the streaming engine.
 
 ### Installation
 
@@ -51,47 +60,61 @@ VoicesFlow Local is built with a robust, multi-threaded architecture:
    ```
 
 2. **Run the Installer**:
-   Double-click `install.bat`. This will:
-   - Create a Python virtual environment (`venv`).
-   - Install all required dependencies from `requirements.txt`.
-   - Download the default Whisper model to the `models/` directory.
+   Double-click `install.bat`. This will set up the virtual environment, install dependencies, and download the default model.
 
-## Step-by-Step Usage Guide
+---
 
-Once installed, VoiceFlow Local is designed to be invisible and efficient. Follow these steps to start dictating:
+## Usage Guide
 
-1. **Launch**: Double-click `start.bat`. You will see a microphone icon appear in your Windows System Tray (bottom-right corner).
-2. **Setup Focus**: Click your mouse into any application where you want to type (e.g., Notepad, WhatsApp, VS Code).
-3. **Record**: Press and hold the **`Ctrl + Space`** hotkey. 
-   - The tray icon will turn **red**, and a real-time waveform will show your audio levels.
-4. **Speak**: Speak naturally. The local AI is optimized for conversational speech and will automatically handle punctuation.
-5. **Finalize**: Release the hotkey. The app will briefly turn **yellow** while processing.
-6. **Result**: Your transcribed text will be automatically typed at your cursor position.
+1. **Launch**: Run `start.bat`. A microphone icon will appear in your System Tray.
+2. **Setup Focus**: Click into any text field (VS Code, Browser, Word, etc.).
+3. **Dictate**: Press and hold **`Ctrl + Space`** (default).
+   - The tray icon turns **red**.
+   - A **live overlay** shows your text appearing in real-time.
+4. **Voice Commands**: While speaking, use commands like:
+   - "Comma", "Period", "Question Mark" for punctuation.
+   - "New line" or "New paragraph" for structure.
+   - "Delete that" to instantly cancel the current phrase.
+5. **Release**: Let go of the hotkey. The final, polished text is injected at your cursor.
+
+---
+
+## Voice Commands Reference
+
+| Command | Action |
+|---------|--------|
+| `period` / `full stop` | Inserts `.` |
+| `comma` | Inserts `,` |
+| `new line` | Inserts a line break |
+| `new paragraph` | Inserts two line breaks |
+| `delete that` | Cancels the current transcription |
+| `question mark` | Inserts `?` |
 
 ---
 
 ## Configuration
 
-Settings can be managed via the UI or by editing `config.py`:
+Settings can be adjusted via the **Settings Window** or in `config.py`:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `HOTKEY` | `ctrl+space` | Global key combination to trigger recording. |
-| `MODEL_SIZE`| `medium` | Whisper model size (`tiny`, `base`, `small`, `medium`, `large-v3`). |
-| `DEVICE` | `cuda` | `cuda` for GPU or `cpu` for CPU-only mode. |
-| `COMPUTE_TYPE`| `float16` | Quantization type for inference (e.g., `int8`, `float16`). |
-| `REMOVE_FILLERS`| `True` | Automatically strips words like "um", "uh", "like". |
+| `HOTKEY` | `ctrl+space` | Trigger for dictation. |
+| `MODEL_SIZE`| `medium` | Whisper model accuracy level. |
+| `TOGGLE_MODE`| `False` | Switch between push-to-talk and toggle behavior. |
+| `REMOVE_FILLERS`| `True` | Strips "um", "uh", "like" from output. |
+| `AUTO_CAPITALIZE`| `True` | Automatically formats sentence starts. |
+| `TRANSLATE` | `False` | Translates incoming speech to English. |
 
 ---
 
 ## Contributing
 
-Contributions are welcome! If you have suggestions for new features or find bugs, please open an issue or submit a pull request.
+Contributions are welcome! Please open an issue or submit a pull request for any features or bug fixes.
 
 1. Fork the Project
-2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the Branch (`git push origin feature/AmazingFeature`)
+2. Create your Feature Branch (`git checkout -b feature/NewFeature`)
+3. Commit your Changes (`git commit -m 'Add NewFeature'`)
+4. Push to the Branch (`git push origin feature/NewFeature`)
 5. Open a Pull Request
 
 ---
@@ -107,4 +130,5 @@ Distributed under the MIT License. See `LICENSE` for more information.
 **Nisarg Patel**
 - GitHub: [@nisargpatel1906](https://github.com/nisargpatel1906)
 
-*Made with support for faster, easier dictation.*
+*Revolutionizing local dictation*
+
