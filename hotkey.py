@@ -23,10 +23,12 @@ class HotkeyManager:
     registrations.
     """
 
-    def __init__(self, on_press_callback=None, on_release_callback=None):
+    def __init__(self, on_press_callback=None, on_release_callback=None, on_quit_callback=None):
         self.hotkey = config.HOTKEY
+        self.quit_hotkey = getattr(config, "QUIT_HOTKEY", "ctrl+q")
         self.on_press_callback = on_press_callback
         self.on_release_callback = on_release_callback
+        self.on_quit_callback = on_quit_callback
 
         self._is_listening = False
         self._is_pressed = False
@@ -34,10 +36,11 @@ class HotkeyManager:
         self._listener_thread = None
         self._stop_event = threading.Event()
         self._press_handle = None
+        self._quit_handle = None
 
-    def _check_conflicts(self):
+    def _check_conflicts(self, hotkey_value=None):
         warnings = []
-        hotkey_lower = self.hotkey.lower()
+        hotkey_lower = (hotkey_value or self.hotkey).lower()
         system_shortcuts = {
             "windows": "Windows key alone is reserved by Windows",
             "windows+e": "Opens File Explorer",
@@ -66,6 +69,12 @@ class HotkeyManager:
             suppress=True,
             trigger_on_release=False,
         )
+        self._quit_handle = keyboard.add_hotkey(
+            self.quit_hotkey,
+            self._on_quit,
+            suppress=True,
+            trigger_on_release=False,
+        )
 
     def _unregister_hotkey(self):
         if self._press_handle is not None:
@@ -74,6 +83,12 @@ class HotkeyManager:
             except Exception:
                 pass
         self._press_handle = None
+        if self._quit_handle is not None:
+            try:
+                keyboard.remove_hotkey(self._quit_handle)
+            except Exception:
+                pass
+        self._quit_handle = None
 
     def _on_press(self):
         if self._is_paused or self._is_pressed:
@@ -97,14 +112,27 @@ class HotkeyManager:
             except Exception as exc:
                 print(f"[ERROR] on_release callback failed: {exc}")
 
+    def _on_quit(self):
+        if self._is_paused:
+            return
+        print(f"[HOTKEY] QUIT and suppressed ({self.quit_hotkey})")
+        if self.on_quit_callback:
+            try:
+                self.on_quit_callback()
+            except Exception as exc:
+                print(f"[ERROR] on_quit callback failed: {exc}")
+
     def _listener_loop(self):
         print(f"[INFO] Starting suppressing hotkey listener for: {self.hotkey}")
         for warning in self._check_conflicts():
             print(f"[WARNING] {warning}")
+        for warning in self._check_conflicts(self.quit_hotkey):
+            print(f"[WARNING] Quit {warning}")
 
         try:
             self._register_hotkey()
             print(f"[OK] Hotkey '{self.hotkey}' active with suppress=True")
+            print(f"[OK] Quit hotkey '{self.quit_hotkey}' active with suppress=True")
             while not self._stop_event.is_set():
                 if self._is_pressed and not keyboard.is_pressed(self.hotkey):
                     self._on_release()
@@ -177,6 +205,19 @@ class HotkeyManager:
         print(f"[INFO] Hotkey updated to: {new_hotkey}")
         for warning in self._check_conflicts():
             print(f"[WARNING] {warning}")
+
+        if self._is_listening and not self._is_paused:
+            self._register_hotkey()
+        return True
+
+    def update_quit_hotkey(self, new_hotkey):
+        if new_hotkey == self.quit_hotkey:
+            return True
+
+        self.quit_hotkey = new_hotkey
+        print(f"[INFO] Quit hotkey updated to: {new_hotkey}")
+        for warning in self._check_conflicts(self.quit_hotkey):
+            print(f"[WARNING] Quit {warning}")
 
         if self._is_listening and not self._is_paused:
             self._register_hotkey()

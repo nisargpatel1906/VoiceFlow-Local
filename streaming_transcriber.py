@@ -50,6 +50,7 @@ class StreamingTranscriber(QObject):
         self._consumer_thread: Optional[threading.Thread] = None
         self._cleanup_helper = StreamingRecorder()
         self.cleaner = TextCleaner()
+        self._transcribe_lock = threading.Lock()
 
         self._load_model()
 
@@ -86,7 +87,8 @@ class StreamingTranscriber(QObject):
             transcribe_kwargs["language"] = self.detected_language
 
         try:
-            segments, info = self.model.transcribe(wav_path, **transcribe_kwargs)
+            with self._transcribe_lock:
+                segments, info = self.model.transcribe(wav_path, **transcribe_kwargs)
         except ValueError as exc:
             if "empty sequence" in str(exc).lower():
                 return ""
@@ -125,7 +127,13 @@ class StreamingTranscriber(QObject):
             else:
                 transcribe_kwargs["language"] = getattr(self.config, "LANGUAGE", None)
 
-            segments, _ = self.model.transcribe(wav_path, **transcribe_kwargs)
+            try:
+                with self._transcribe_lock:
+                    segments, _ = self.model.transcribe(wav_path, **transcribe_kwargs)
+            except ValueError as exc:
+                if "empty sequence" in str(exc).lower():
+                    return ""
+                raise
             return " ".join(segment.text for segment in segments).strip()
         finally:
             self._cleanup_helper.cleanup(wav_path)

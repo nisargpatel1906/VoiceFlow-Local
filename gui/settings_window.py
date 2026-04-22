@@ -50,6 +50,7 @@ SUCCESS = "#2E7D32"
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "HOTKEY": "ctrl+space",
+    "QUIT_HOTKEY": "ctrl+q",
     "TOGGLE_MODE": False,
     "MODEL_SIZE": "medium",
     "DEVICE": "cuda",
@@ -453,6 +454,7 @@ class SettingsWindow(QWidget):
     def _build_cleanup(self):
         card = SectionCard("TEXT CLEANUP")
         self.remove_fillers = Toggle(bool(cfg("REMOVE_FILLERS")))
+        self.remove_fillers.toggled.connect(self._sync_cleanup_controls)
         card.row("remove filler words", "removes um, uh, like, you know...", self.remove_fillers)
 
         self.chips_wrap = QWidget()
@@ -470,6 +472,7 @@ class SettingsWindow(QWidget):
         self.voice_commands = Toggle(bool(cfg("ENABLE_VOICE_COMMANDS")))
         card.row("voice commands", '"new line", "comma", "delete that"', self.voice_commands)
         self.content_layout.addWidget(card)
+        self._sync_cleanup_controls()
 
     def _build_save_log(self):
         card = SectionCard("SAVE LOG")
@@ -569,15 +572,26 @@ class SettingsWindow(QWidget):
             if item and item.widget():
                 item.widget().deleteLater()
 
+        enabled = self.remove_fillers.isChecked()
         for index, word in enumerate(self.filler_words):
             chip = Chip(word)
             chip.removed.connect(self._remove_filler)
+            chip.setEnabled(enabled)
+            chip.setStyleSheet(
+                f"background: {'#fbfaf7' if enabled else '#f3efe7'}; color: {TEXT if enabled else MUTED}; "
+                f"border: 1px solid {BORDER}; border-radius: 8px; padding: 6px 8px; font-size: 9px; font-weight: 600;"
+            )
             self.chips.addWidget(chip, index // 4, index % 4)
 
         add = QPushButton("+ add word")
         add.clicked.connect(self._add_filler)
         add.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         add.setStyleSheet(f"background: {PRIMARY}; color: #ffffff; border: none; border-radius: 6px; padding: 6px 10px; font-size: 9px; font-weight: 700;")
+        add.setEnabled(enabled)
+        add.setStyleSheet(
+            f"background: {PRIMARY if enabled else '#bdb6ab'}; color: #ffffff; border: none; "
+            f"border-radius: 6px; padding: 6px 10px; font-size: 9px; font-weight: 700;"
+        )
         index = len(self.filler_words)
         self.chips.addWidget(add, index // 4, index % 4)
 
@@ -586,11 +600,17 @@ class SettingsWindow(QWidget):
         self._render_chips()
 
     def _add_filler(self):
+        if not self.remove_fillers.isChecked():
+            return
         word, ok = QInputDialog.getText(self, "Add filler word", "Word or phrase:")
         word = word.strip()
         if ok and word and word not in self.filler_words:
             self.filler_words.append(word)
             self._render_chips()
+
+    def _sync_cleanup_controls(self):
+        self.chips_wrap.setEnabled(self.remove_fillers.isChecked())
+        self._render_chips()
 
     def _load_values(self):
         self.model_size.setCurrentText(str(cfg("MODEL_SIZE")))
@@ -850,6 +870,7 @@ import os
 
 # Hotkey
 HOTKEY = {literal(values["HOTKEY"])}
+QUIT_HOTKEY = {literal(values.get("QUIT_HOTKEY", "ctrl+q"))}
 TOGGLE_MODE = {literal(values["TOGGLE_MODE"])}
 
 # Whisper model

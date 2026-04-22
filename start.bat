@@ -1,29 +1,28 @@
 @echo off
+setlocal
+
 REM =============================================================================
 REM VoiceFlow Local - Launch Script
 REM =============================================================================
 REM Starts the voice dictation application using the virtual environment.
 REM =============================================================================
 
-echo ============================================
-echo   VoiceFlow Local - Starting...
-echo ============================================
-echo.
-
 REM Check if virtual environment exists
 if not exist "venv" (
-    echo [ERROR] Virtual environment not found.
-    echo Please run install.bat first.
-    pause
+    > voiceflow_start.log echo [ERROR] Virtual environment not found. Please run install.bat first.
     exit /b 1
 )
 
 REM Launch the main application
 set KMP_DUPLICATE_LIB_OK=TRUE
-venv\Scripts\python.exe main.py
-if errorlevel 1 (
-    echo.
-    echo [ERROR] Application exited with an error.
-    echo Check the error messages above for details.
-    pause
+if exist "venv\Scripts\pythonw.exe" (
+    powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command ^
+        "$env:KMP_DUPLICATE_LIB_OK='TRUE';" ^
+        "Start-Process -FilePath '%CD%\venv\Scripts\pythonw.exe' -ArgumentList 'main.py' -WorkingDirectory '%CD%' -WindowStyle Hidden"
+) else (
+    powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command ^
+        "$env:KMP_DUPLICATE_LIB_OK='TRUE';" ^
+        "Start-Process -FilePath '%CD%\venv\Scripts\python.exe' -ArgumentList 'main.py' -WorkingDirectory '%CD%' -WindowStyle Hidden"
 )
+
+exit /b 0

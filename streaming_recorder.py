@@ -7,6 +7,7 @@ temporary WAV file for live transcription pipelines.
 
 from __future__ import annotations
 
+import audioop
 import os
 import queue
 import sys
@@ -26,6 +27,7 @@ class StreamingRecorder:
     CHUNK_DURATION_MS = 500 if sys.platform == "win32" else 2500 if sys.platform == "darwin" else 500
     SNAPSHOT_WINDOW_MS = 2000 if sys.platform == "win32" else 5000 if sys.platform == "darwin" else 2000
     ROLLING_BUFFER_SECONDS = 30
+    SILENCE_RMS_THRESHOLD = 280
 
     def __init__(self):
         self.frames_per_chunk = int(self.SAMPLE_RATE * self.CHUNK_DURATION_MS / 1000)
@@ -41,12 +43,25 @@ class StreamingRecorder:
         self._sentinel_lock = threading.Lock()
         self._last_error: Optional[str] = None
         self._snapshot_window_bytes = int(self.SAMPLE_RATE * self.SAMPLE_WIDTH * self.SNAPSHOT_WINDOW_MS / 1000)
+        self._silence_threshold_ms = 0
+        self._silence_elapsed_ms = 0
+        self._silence_callback = None
+        self._silence_triggered = False
 
-    def start(self, chunk_queue: "queue.Queue[Optional[str]]"):
+    def start(
+        self,
+        chunk_queue: "queue.Queue[Optional[str]]",
+        on_silence_timeout=None,
+        silence_threshold_sec: Optional[int] = None,
+    ):
         if self._thread and self._thread.is_alive():
             return
 
         self.chunk_queue = chunk_queue
+        self._silence_callback = on_silence_timeout
+        self._silence_threshold_ms = max(0, int((silence_threshold_sec or 0) * 1000))
+        self._silence_elapsed_ms = 0
+        self._silence_triggered = False
         self._stop_event.clear()
         self._last_error = None
         self._sentinel_sent = False
@@ -120,6 +135,7 @@ class StreamingRecorder:
                     break
 
                 self._append_to_rolling_buffer(chunk)
+                self._update_silence_state(chunk)
                 wav_path = tempfile.mktemp(suffix=".wav")
 
                 try:
@@ -131,6 +147,8 @@ class StreamingRecorder:
                     self._last_error = f"Failed to write streaming chunk WAV: {exc}"
                     print(f"[ERROR] {self._last_error}")
                     self.cleanup(wav_path)
+                    break
+                if self._silence_triggered:
                     break
         finally:
             self._close_stream()
@@ -148,6 +166,27 @@ class StreamingRecorder:
             if len(self._rolling_buffer) <= self._snapshot_window_bytes:
                 return bytes(self._rolling_buffer)
             return bytes(self._rolling_buffer[-self._snapshot_window_bytes :])
+
+    def _update_silence_state(self, chunk: bytes):
+        if self._silence_threshold_ms <= 0 or self._silence_triggered:
+            return
+
+        rms = audioop.rms(chunk, self.SAMPLE_WIDTH) if chunk else 0
+        if rms <= self.SILENCE_RMS_THRESHOLD:
+            self._silence_elapsed_ms += self.CHUNK_DURATION_MS
+        else:
+            self._silence_elapsed_ms = 0
+
+        if self._silence_elapsed_ms < self._silence_threshold_ms:
+            return
+
+        self._silence_triggered = True
+        self._stop_event.set()
+        if self._silence_callback:
+            try:
+                self._silence_callback()
+            except Exception:
+                pass
 
     def _put_chunk_path(self, wav_path: str):
         if self.chunk_queue is None:

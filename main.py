@@ -119,6 +119,7 @@ class JsonlHistory:
 class VoiceFlowApp(QObject):
     hotkey_pressed = pyqtSignal()
     hotkey_released = pyqtSignal()
+    silence_timeout = pyqtSignal()
     final_audio_ready = pyqtSignal(str, float)
     final_audio_failed = pyqtSignal(str)
 
@@ -138,8 +139,9 @@ class VoiceFlowApp(QObject):
         self.history = JsonlHistory(config.LOG_FILE, config.HISTORY_LIMIT)
         self.transcription_signals = TranscriptionSignals()
         self.stream_recorder = StreamingRecorder()
-        self.stream_transcriber = StreamingTranscriber(config)
-        self.stream_transcriber.error_ready.connect(self._on_streaming_error)
+        self.stream_transcriber: StreamingTranscriber | None = None
+        self._stream_transcriber_signature = None
+        self._ensure_stream_transcriber()
         self.chunk_queue: "queue.Queue[str | None]" = queue.Queue(maxsize=3)
         self.recording_started_at = 0.0
         self.pending_final_audio: bytes | None = None
@@ -158,11 +160,13 @@ class VoiceFlowApp(QObject):
 
         self.hotkey_pressed.connect(self._start_recording)
         self.hotkey_released.connect(self._stop_recording)
+        self.silence_timeout.connect(self._finish_recording)
         self.final_audio_ready.connect(self._on_final_text)
         self.final_audio_failed.connect(self._on_worker_error)
         self.hotkey = HotkeyManager(
             on_press_callback=lambda: self.hotkey_pressed.emit(),
             on_release_callback=lambda: self.hotkey_released.emit(),
+            on_quit_callback=self.quit,
         )
 
         self.transcriber_thread: StreamingWhisperThread | None = None
@@ -180,10 +184,15 @@ class VoiceFlowApp(QObject):
 
     @pyqtSlot()
     def _start_recording(self):
-        if self.is_recording or self.is_processing:
+        if self.is_processing:
+            return
+        if self.is_recording:
+            if getattr(config, "TOGGLE_MODE", False):
+                self._finish_recording()
             return
 
         self.logger.info("Hotkey pressed")
+        self._ensure_stream_transcriber()
         self.is_recording = True
         self.is_processing = False
         self.recording_started_at = time.time()
@@ -201,7 +210,11 @@ class VoiceFlowApp(QObject):
         try:
             on_partial, on_final = self.get_streaming_callbacks()
             self.stream_transcriber.start(self.chunk_queue, on_partial=on_partial, on_final=on_final)
-            self.stream_recorder.start(self.chunk_queue)
+            self.stream_recorder.start(
+                self.chunk_queue,
+                on_silence_timeout=lambda: self.silence_timeout.emit(),
+                silence_threshold_sec=getattr(config, "SILENCE_THRESHOLD_SEC", 0),
+            )
         except Exception as exc:
             try:
                 self.stream_recorder.stop()
@@ -212,6 +225,13 @@ class VoiceFlowApp(QObject):
 
     @pyqtSlot()
     def _stop_recording(self):
+        if not self.is_recording:
+            return
+        if getattr(config, "TOGGLE_MODE", False):
+            return
+        self._finish_recording()
+
+    def _finish_recording(self):
         if not self.is_recording:
             return
 
@@ -308,8 +328,9 @@ class VoiceFlowApp(QObject):
 
         if clean_text != "DELETE_LAST":
             entry = make_history_entry(clean_text, duration_sec)
-            self.history.add(entry)
-            self.window.add_history_entry(entry)
+            if getattr(config, "AUTO_SAVE", True):
+                self.history.add(entry)
+                self.window.add_history_entry(entry)
             self._inject_text_async(clean_text)
             self.tray.notify(clean_text[:60] + ("..." if len(clean_text) > 60 else ""))
             self._play_app_sound()
@@ -401,8 +422,9 @@ class VoiceFlowApp(QObject):
     def _reload_settings(self):
         importlib.reload(config)
         self.cleaner = TextCleaner()
-        self.stream_transcriber = StreamingTranscriber(config)
-        self.stream_transcriber.error_ready.connect(self._on_streaming_error)
+        if self._transcriber_signature() != self._stream_transcriber_signature:
+            self.stream_transcriber = None
+            self._stream_transcriber_signature = None
         self.history.path = config.LOG_FILE
         self.history.limit = config.HISTORY_LIMIT
         self.history.load()
@@ -410,13 +432,36 @@ class VoiceFlowApp(QObject):
         if self.hotkey.hotkey != config.HOTKEY:
             self.hotkey.update_hotkey(config.HOTKEY)
             self.window.refresh_hotkey_display()
+        self.hotkey.update_quit_hotkey(getattr(config, "QUIT_HOTKEY", "ctrl+q"))
         self.tray.notify("Settings saved")
+
+    def _transcriber_signature(self):
+        return (
+            getattr(config, "MODEL_SIZE", None),
+            getattr(config, "DEVICE", None),
+            getattr(config, "COMPUTE_TYPE", None),
+            getattr(config, "LANGUAGE", None),
+            getattr(config, "TRANSLATE_TO_ENGLISH", None),
+            getattr(config, "BEAM_SIZE", None),
+            getattr(config, "MODEL_DIR", None),
+        )
+
+    def _ensure_stream_transcriber(self):
+        signature = self._transcriber_signature()
+        if self.stream_transcriber is not None and self._stream_transcriber_signature == signature:
+            return
+        self.stream_transcriber = StreamingTranscriber(config)
+        self.stream_transcriber.error_ready.connect(self._on_streaming_error)
+        self._stream_transcriber_signature = signature
 
     @pyqtSlot(dict)
     def _load_history_entry(self, entry: Dict):
         self.window.update_live_text(entry.get("text", ""))
 
     def quit(self):
+        self._play_app_sound()
+        self.qt_app.processEvents()
+        time.sleep(0.12)
         self.hotkey.stop()
         self.stream_recorder.stop()
         if self.transcriber_thread and self.transcriber_thread.isRunning():

@@ -8,6 +8,7 @@ import os
 
 # Hotkey
 HOTKEY = 'ctrl+space'
+QUIT_HOTKEY = 'ctrl+q'
 TOGGLE_MODE = False
 
 # Whisper model
