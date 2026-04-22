@@ -10,12 +10,15 @@ pyaudio==0.2.14            # Microphone input (PortAudio bindings)
 
 # Hotkey detection
 keyboard==0.13.5           # Global hotkey listener
+pynput==1.7.7              # macOS global hotkey listener
 
 # Clipboard operations
 pyperclip==1.9.0           # Copy/paste transcribed text
 
 # GUI automation
 pyautogui==0.9.54          # Simulate keyboard input for pasting
+pyobjc-core==10.3.2; sys_platform == "darwin"  # Required by pyautogui on macOS
+pyobjc==10.3.2; sys_platform == "darwin"       # Quartz / AppKit bindings for macOS
 
 # System tray UI
 PyQt6==6.7.0               # System tray icon and menus

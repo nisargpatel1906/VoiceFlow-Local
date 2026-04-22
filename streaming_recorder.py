@@ -78,10 +78,15 @@ class StreamingRecorder:
 
     def stop(self):
         self._stop_event.set()
-        self._close_stream()
 
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=2.0)
+
+        if self._thread and self._thread.is_alive():
+            self._close_stream()
+            self._thread.join(timeout=1.0)
+        else:
+            self._close_stream()
 
         self._emit_sentinel()
 
@@ -125,6 +130,8 @@ class StreamingRecorder:
     def _capture_loop(self):
         try:
             while not self._stop_event.is_set():
+                if self.stream is None:
+                    break
                 try:
                     chunk = self.stream.read(self.frames_per_chunk, exception_on_overflow=False)
                 except Exception as exc:

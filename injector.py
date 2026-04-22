@@ -1,20 +1,27 @@
 """
 VoiceFlow Local - Text Injector Module
 
-Injects transcribed text into the currently focused Windows application.
-Uses clipboard + Ctrl+V as primary method, pyautogui.write() as fallback.
+Injects transcribed text into the currently focused application.
+Uses clipboard paste as primary method, pyautogui.write() as fallback.
 """
 
+import sys
 import time
 import threading
 import pyperclip
-import pyautogui
 import config
+
+try:
+    import pyautogui
+    _PYAUTOGUI_IMPORT_ERROR = None
+except Exception as exc:
+    pyautogui = None
+    _PYAUTOGUI_IMPORT_ERROR = exc
 
 
 class TextInjector:
     """
-    Injects text into the active Windows application.
+    Injects text into the active application.
 
     Uses a two-tier strategy:
     1. Clipboard + Ctrl+V (works in 99% of apps)
@@ -30,8 +37,12 @@ class TextInjector:
     def __init__(self):
         """Initialize the text injector."""
         # Configure pyautogui for faster typing
-        pyautogui.PAUSE = self.KEY_INTERVAL
-        pyautogui.FAILSAFE = False  # Disable fail-safe for injection
+        self.available = pyautogui is not None
+        if self.available:
+            pyautogui.PAUSE = self.KEY_INTERVAL
+            pyautogui.FAILSAFE = False  # Disable fail-safe for injection
+        else:
+            print(f"[WARNING] Text injection automation unavailable: {_PYAUTOGUI_IMPORT_ERROR}")
 
     def _save_clipboard(self):
         """
@@ -96,9 +107,13 @@ class TextInjector:
         """
         print("[DEBUG] Attempting clipboard paste method...")
 
+        if not self.available:
+            print("[ERROR] Clipboard paste unavailable because pyautogui is not installed correctly.")
+            return False
+
         try:
-            # Simulate Ctrl+V
-            pyautogui.hotkey('ctrl', 'v')
+            paste_modifier = 'command' if sys.platform == 'darwin' else 'ctrl'
+            pyautogui.hotkey(paste_modifier, 'v')
             time.sleep(0.1)  # Small delay to ensure paste completes
             print("[OK] Clipboard paste successful")
             return True
@@ -117,6 +132,10 @@ class TextInjector:
             bool: True if successful, False otherwise.
         """
         print("[DEBUG] Attempting typing fallback method...")
+
+        if not self.available:
+            print("[ERROR] Typing fallback unavailable because pyautogui is not installed correctly.")
+            return False
 
         try:
             # Type each character with small delay

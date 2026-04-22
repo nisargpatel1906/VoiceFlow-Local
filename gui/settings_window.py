@@ -109,13 +109,16 @@ def cfg(name: str) -> Any:
 
 def format_hotkey(value: str) -> str:
     parts = [part.strip() for part in value.replace("-", "+").split("+") if part.strip()]
+    meta_name = "Cmd" if sys.platform == "darwin" else "Win"
     names = {
         "ctrl": "Ctrl",
         "control": "Ctrl",
         "alt": "Alt",
         "shift": "Shift",
-        "windows": "Win",
-        "win": "Win",
+        "windows": meta_name,
+        "win": meta_name,
+        "command": meta_name,
+        "cmd": meta_name,
         "space": "Space",
     }
     return " + ".join(names.get(part.lower(), part.upper() if len(part) == 1 else part.title()) for part in parts)
@@ -126,6 +129,8 @@ def normalize_hotkey(display_value: str) -> str:
 
 
 def detect_cuda_label() -> str:
+    if sys.platform == "darwin":
+        return "Apple Silicon CPU"
     try:
         import torch
 
@@ -137,27 +142,81 @@ def detect_cuda_label() -> str:
 
 
 def startup_command() -> str:
-    pythonw = Path(sys.executable).with_name("pythonw.exe")
-    exe = pythonw if pythonw.exists() else Path(sys.executable)
+    if sys.platform == "darwin":
+        launcher = Path(__file__).resolve().parents[1] / "start_mac.command"
+        if not launcher.exists():
+            launcher = Path(__file__).resolve().parents[1] / "start.command"
+        if launcher.exists():
+            return f'/bin/bash "{launcher}"'
+        exe = Path(sys.executable)
+    else:
+        pythonw = Path(sys.executable).with_name("pythonw.exe")
+        exe = pythonw if pythonw.exists() else Path(sys.executable)
     main_py = Path(__file__).resolve().parents[1] / "main.py"
     return f'"{exe}" "{main_py}"'
 
 
 def set_startup_enabled(enabled: bool):
-    if sys.platform != "win32":
+    if sys.platform == "win32":
+        import winreg
+
+        key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE) as key:
+            if enabled:
+                winreg.SetValueEx(key, "VoiceFlow Local", 0, winreg.REG_SZ, startup_command())
+            else:
+                try:
+                    winreg.DeleteValue(key, "VoiceFlow Local")
+                except FileNotFoundError:
+                    pass
         return
 
-    import winreg
-
-    key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
-    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE) as key:
+    if sys.platform == "darwin":
+        launch_agents = Path.home() / "Library" / "LaunchAgents"
+        launch_agents.mkdir(parents=True, exist_ok=True)
+        plist_path = launch_agents / "com.voiceflow.local.plist"
+        launcher = Path(__file__).resolve().parents[1] / "start_mac.command"
+        if not launcher.exists():
+            launcher = Path(__file__).resolve().parents[1] / "start.command"
+        main_py = Path(__file__).resolve().parents[1] / "main.py"
+        program_args = (
+            f"""
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>{launcher}</string>
+    </array>"""
+            if launcher.exists()
+            else f"""
+    <key>ProgramArguments</key>
+    <array>
+        <string>{Path(sys.executable)}</string>
+        <string>{main_py}</string>
+    </array>"""
+        )
+        plist = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.voiceflow.local</string>
+{program_args}
+    <key>WorkingDirectory</key>
+    <string>{main_py.parent}</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>{main_py.parent / 'voiceflow_start.log'}</string>
+    <key>StandardErrorPath</key>
+    <string>{main_py.parent / 'voiceflow_start.log'}</string>
+</dict>
+</plist>
+"""
         if enabled:
-            winreg.SetValueEx(key, "VoiceFlow Local", 0, winreg.REG_SZ, startup_command())
-        else:
-            try:
-                winreg.DeleteValue(key, "VoiceFlow Local")
-            except FileNotFoundError:
-                pass
+            plist_path.write_text(plist, encoding="utf-8")
+        elif plist_path.exists():
+            plist_path.unlink()
+        return
 
 
 class Toggle(QCheckBox):
@@ -435,11 +494,18 @@ class SettingsWindow(QWidget):
         device_layout.setContentsMargins(0, 0, 0, 0)
         device_layout.setSpacing(8)
         self.device_badge = QLabel(detect_cuda_label())
-        self.device_badge.setStyleSheet("background: #e9f6ed; color: #16873c; border: 1px solid #c6e8d1; border-radius: 5px; padding: 4px 7px; font-weight: 700; font-size: 9px;")
-        self.compute_type = self.combo(["float16", "float32", "int8"])
+        if sys.platform == "darwin":
+            self.device_badge.setStyleSheet("background: #eef1f4; color: #45505f; border: 1px solid #d4d9df; border-radius: 5px; padding: 4px 7px; font-weight: 700; font-size: 9px;")
+            compute_options = ["int8", "float32"]
+            device_subtitle = "optimized for macOS CPU"
+        else:
+            self.device_badge.setStyleSheet("background: #e9f6ed; color: #16873c; border: 1px solid #c6e8d1; border-radius: 5px; padding: 4px 7px; font-weight: 700; font-size: 9px;")
+            compute_options = ["float16", "float32", "int8"]
+            device_subtitle = "GPU detected: RTX 3050"
+        self.compute_type = self.combo(compute_options)
         device_layout.addWidget(self.device_badge)
         device_layout.addWidget(self.compute_type)
-        card.row("device", "GPU detected: RTX 3050", device_wrap)
+        card.row("device", device_subtitle, device_wrap)
 
         self.language = self.combo(["auto detect", "english", "hindi", "hinglish", "gujarati"])
         card.row("language", "auto-detect or fix to one language", self.language)
@@ -503,7 +569,9 @@ class SettingsWindow(QWidget):
     def _build_behaviour(self):
         card = SectionCard("BEHAVIOUR")
         self.start_with_windows = Toggle(bool(cfg("START_WITH_WINDOWS")))
-        card.row("start with Windows", "launch automatically on boot", self.start_with_windows)
+        startup_title = "start at login" if sys.platform == "darwin" else "start with Windows"
+        startup_subtitle = "launch automatically on login" if sys.platform == "darwin" else "launch automatically on boot"
+        card.row(startup_title, startup_subtitle, self.start_with_windows)
         self.show_notifications = Toggle(bool(cfg("SHOW_NOTIFICATIONS")))
         card.row("show notification on paste", "brief toast after each dictation", self.show_notifications)
         self.silence_threshold, self.silence_value = self.slider(1, 10, suffix="s")
@@ -625,11 +693,15 @@ class SettingsWindow(QWidget):
     def current_values(self) -> Dict[str, Any]:
         language_choice = self.language.currentText()
         log_file = self.log_path.text()
+        if sys.platform == "darwin":
+            device = "cpu"
+        else:
+            device = "cuda"
         return {
             "HOTKEY": self.hotkey_field.hotkey,
             "TOGGLE_MODE": self.toggle_mode.isChecked(),
             "MODEL_SIZE": self.model_size.currentText(),
-            "DEVICE": "cuda",
+            "DEVICE": device,
             "COMPUTE_TYPE": self.compute_type.currentText(),
             "LANGUAGE": LANGUAGE_TO_CODE[language_choice],
             "LANGUAGE_CHOICE": language_choice,

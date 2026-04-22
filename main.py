@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import queue
+import subprocess
 import sys
 import threading
 import time
@@ -98,7 +99,9 @@ class JsonlHistory:
     def add(self, entry: Dict):
         self.entries.append(entry)
         self.entries = self.entries[-self.limit :]
-        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        directory = os.path.dirname(self.path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
         with open(self.path, "a", encoding="utf-8") as handle:
             handle.write(json.dumps({k: v for k, v in entry.items() if k != "time_label"}, ensure_ascii=False) + "\n")
 
@@ -119,6 +122,7 @@ class JsonlHistory:
 class VoiceFlowApp(QObject):
     hotkey_pressed = pyqtSignal()
     hotkey_released = pyqtSignal()
+    quit_requested = pyqtSignal()
     silence_timeout = pyqtSignal()
     final_audio_ready = pyqtSignal(str, float)
     final_audio_failed = pyqtSignal(str)
@@ -147,6 +151,8 @@ class VoiceFlowApp(QObject):
         self.pending_final_audio: bytes | None = None
         self.pending_final_duration = 0.0
         self._sound_path = Path(__file__).resolve().with_name("sound.mp3")
+        self._enter_sound_path = Path(__file__).resolve().with_name("enter.mp3")
+        self._quit_sound_path = Path(__file__).resolve().with_name("quite.mp3")
         self._sound_lock = threading.Lock()
         self._mci_alias = "voiceflow_sound"
 
@@ -160,13 +166,14 @@ class VoiceFlowApp(QObject):
 
         self.hotkey_pressed.connect(self._start_recording)
         self.hotkey_released.connect(self._stop_recording)
+        self.quit_requested.connect(self.quit)
         self.silence_timeout.connect(self._finish_recording)
         self.final_audio_ready.connect(self._on_final_text)
         self.final_audio_failed.connect(self._on_worker_error)
         self.hotkey = HotkeyManager(
             on_press_callback=lambda: self.hotkey_pressed.emit(),
             on_release_callback=lambda: self.hotkey_released.emit(),
-            on_quit_callback=self.quit,
+            on_quit_callback=lambda: self.quit_requested.emit(),
         )
 
         self.transcriber_thread: StreamingWhisperThread | None = None
@@ -179,7 +186,7 @@ class VoiceFlowApp(QObject):
         self.window.set_state("idle")
         self.tray.set_state("idle")
         self.tray.notify(f"Ready. Hold {config.HOTKEY} to dictate")
-        self._play_app_sound()
+        self._play_app_sound(self._enter_sound_path if self._enter_sound_path.exists() else self._sound_path)
         return self.qt_app.exec()
 
     @pyqtSlot()
@@ -337,11 +344,13 @@ class VoiceFlowApp(QObject):
 
         self._reset_idle()
 
-    def _play_app_sound(self):
+    def _play_app_sound(self, sound_path: Path | None = None):
         def _worker():
             try:
                 if sys.platform == "win32":
-                    self._play_windows_mp3()
+                    self._play_windows_mp3(sound_path or self._sound_path)
+                elif sys.platform == "darwin":
+                    self._play_macos_sound(sound_path or self._sound_path)
                 else:
                     QApplication.beep()
             except Exception as exc:
@@ -349,8 +358,8 @@ class VoiceFlowApp(QObject):
 
         threading.Thread(target=_worker, daemon=True, name="VoiceFlowAppSound").start()
 
-    def _play_windows_mp3(self):
-        if not self._sound_path.exists():
+    def _play_windows_mp3(self, sound_path: Path):
+        if not sound_path.exists():
             return
 
         mci_send_string = ctypes.windll.winmm.mciSendStringW
@@ -367,9 +376,18 @@ class VoiceFlowApp(QObject):
                 mci_send_string(f"close {self._mci_alias}", None, 0, None)
             except Exception:
                 pass
-            sound_path = str(self._sound_path).replace('"', '""')
-            _send(f'open "{sound_path}" type mpegvideo alias {self._mci_alias}')
+            sound_file = str(sound_path).replace('"', '""')
+            _send(f'open "{sound_file}" type mpegvideo alias {self._mci_alias}')
             _send(f"play {self._mci_alias} from 0")
+
+    def _play_macos_sound(self, sound_path: Path):
+        if not sound_path.exists():
+            return
+        subprocess.Popen(
+            ["afplay", str(sound_path)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
 
     def get_streaming_callbacks(self):
         return (
@@ -459,7 +477,7 @@ class VoiceFlowApp(QObject):
         self.window.update_live_text(entry.get("text", ""))
 
     def quit(self):
-        self._play_app_sound()
+        self._play_app_sound(self._quit_sound_path if self._quit_sound_path.exists() else self._sound_path)
         self.qt_app.processEvents()
         time.sleep(0.12)
         self.hotkey.stop()

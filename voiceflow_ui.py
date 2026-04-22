@@ -65,13 +65,16 @@ def app_logo_icon() -> QIcon:
 
 def format_hotkey_text(value: str) -> str:
     parts = [part.strip() for part in value.replace("-", "+").split("+") if part.strip()]
+    meta_name = "Cmd" if sys.platform == "darwin" else "Win"
     names = {
         "ctrl": "Ctrl",
         "control": "Ctrl",
         "alt": "Alt",
         "shift": "Shift",
-        "windows": "Win",
-        "win": "Win",
+        "windows": meta_name,
+        "win": meta_name,
+        "command": meta_name,
+        "cmd": meta_name,
         "space": "Space",
     }
     return " + ".join(names.get(part.lower(), part.upper() if len(part) == 1 else part.title()) for part in parts)

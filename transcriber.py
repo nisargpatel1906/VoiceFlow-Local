@@ -27,8 +27,12 @@ class WhisperTranscriber:
         """
         self.model = None
         self.model_size = config.MODEL_SIZE
-        self.device = config.DEVICE
-        self.compute_type = config.COMPUTE_TYPE
+        if sys.platform == "darwin":
+            self.device = "cpu"
+            self.compute_type = "int8"
+        else:
+            self.device = config.DEVICE
+            self.compute_type = config.COMPUTE_TYPE
         self._model_loaded = False
 
     def _load_model(self):

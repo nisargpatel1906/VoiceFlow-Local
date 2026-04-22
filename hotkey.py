@@ -1,16 +1,25 @@
 """
-VoiceFlow Local - suppressing global hotkey listener.
+VoiceFlow Local - global hotkey listener.
 
-The configured hotkey is intercepted globally while VoiceFlow is running so the
-foreground app does not receive it. Other keys pass through normally.
+Windows keeps the existing suppressed keyboard hook path.
+macOS uses pynput for global key detection without key suppression.
 """
 
+import sys
 import threading
 import time
 
-import keyboard
-
 import config
+
+if sys.platform == "darwin":
+    try:
+        from pynput import keyboard as pynput_keyboard
+        _PYNPUT_IMPORT_ERROR = None
+    except Exception as exc:
+        pynput_keyboard = None
+        _PYNPUT_IMPORT_ERROR = exc
+else:
+    import keyboard
 
 
 class HotkeyManager:
@@ -37,32 +46,63 @@ class HotkeyManager:
         self._stop_event = threading.Event()
         self._press_handle = None
         self._quit_handle = None
+        self._listener = None
+        self._pressed_keys = set()
+        self._quit_fired = False
+        self._hotkey_tokens = self._parse_hotkey(self.hotkey)
+        self._quit_hotkey_tokens = self._parse_hotkey(self.quit_hotkey)
 
     def _check_conflicts(self, hotkey_value=None):
         warnings = []
         hotkey_lower = (hotkey_value or self.hotkey).lower()
-        system_shortcuts = {
-            "windows": "Windows key alone is reserved by Windows",
-            "windows+e": "Opens File Explorer",
-            "windows+d": "Shows desktop",
-            "windows+l": "Locks computer",
-            "windows+r": "Opens Run dialog",
-            "windows+tab": "Opens Task View",
-            "alt+tab": "Switches applications",
-            "ctrl+alt+del": "Opens security screen",
-            "alt+f4": "Closes active window",
-            "ctrl+c": "Copy shortcut",
-            "ctrl+v": "Paste shortcut",
-            "ctrl+x": "Cut shortcut",
-        }
+        if sys.platform == "darwin":
+            system_shortcuts = {
+                "command+space": "Opens Spotlight",
+                "ctrl+space": "Often switches input source",
+                "command+tab": "Switches applications",
+                "command+q": "Quits the active app",
+                "command+c": "Copy shortcut",
+                "command+v": "Paste shortcut",
+                "command+x": "Cut shortcut",
+            }
+        else:
+            system_shortcuts = {
+                "windows": "Windows key alone is reserved by Windows",
+                "windows+e": "Opens File Explorer",
+                "windows+d": "Shows desktop",
+                "windows+l": "Locks computer",
+                "windows+r": "Opens Run dialog",
+                "windows+tab": "Opens Task View",
+                "alt+tab": "Switches applications",
+                "ctrl+alt+del": "Opens security screen",
+                "alt+f4": "Closes active window",
+                "ctrl+c": "Copy shortcut",
+                "ctrl+v": "Paste shortcut",
+                "ctrl+x": "Cut shortcut",
+            }
         if hotkey_lower in system_shortcuts:
-            warnings.append(f"Conflict warning: '{self.hotkey}' - {system_shortcuts[hotkey_lower]}")
-        if hotkey_lower in ["ctrl", "alt", "shift", "windows"]:
-            warnings.append(f"Warning: Single modifier key '{self.hotkey}' may not work reliably")
+            warnings.append(f"Conflict warning: '{hotkey_value or self.hotkey}' - {system_shortcuts[hotkey_lower]}")
+        modifier_only = ["ctrl", "alt", "shift", "windows", "command"]
+        if hotkey_lower in modifier_only:
+            warnings.append(f"Warning: Single modifier key '{hotkey_value or self.hotkey}' may not work reliably")
         return warnings
 
     def _register_hotkey(self):
         self._unregister_hotkey()
+        self._hotkey_tokens = self._parse_hotkey(self.hotkey)
+        self._quit_hotkey_tokens = self._parse_hotkey(self.quit_hotkey)
+        if sys.platform == "darwin":
+            if pynput_keyboard is None:
+                raise RuntimeError(
+                    f"macOS hotkeys require pynput. Install requirements first. ({_PYNPUT_IMPORT_ERROR})"
+                )
+            self._listener = pynput_keyboard.Listener(
+                on_press=self._on_native_press,
+                on_release=self._on_native_release,
+            )
+            self._listener.start()
+            return
+
         self._press_handle = keyboard.add_hotkey(
             self.hotkey,
             self._on_press,
@@ -77,6 +117,18 @@ class HotkeyManager:
         )
 
     def _unregister_hotkey(self):
+        if sys.platform == "darwin":
+            listener = self._listener
+            self._listener = None
+            if listener is not None:
+                try:
+                    listener.stop()
+                except Exception:
+                    pass
+            self._pressed_keys.clear()
+            self._quit_fired = False
+            return
+
         if self._press_handle is not None:
             try:
                 keyboard.remove_hotkey(self._press_handle)
@@ -123,7 +175,10 @@ class HotkeyManager:
                 print(f"[ERROR] on_quit callback failed: {exc}")
 
     def _listener_loop(self):
-        print(f"[INFO] Starting suppressing hotkey listener for: {self.hotkey}")
+        if sys.platform == "darwin":
+            print(f"[INFO] Starting macOS hotkey listener for: {self.hotkey}")
+        else:
+            print(f"[INFO] Starting suppressing hotkey listener for: {self.hotkey}")
         for warning in self._check_conflicts():
             print(f"[WARNING] {warning}")
         for warning in self._check_conflicts(self.quit_hotkey):
@@ -131,15 +186,23 @@ class HotkeyManager:
 
         try:
             self._register_hotkey()
-            print(f"[OK] Hotkey '{self.hotkey}' active with suppress=True")
-            print(f"[OK] Quit hotkey '{self.quit_hotkey}' active with suppress=True")
+            if sys.platform == "darwin":
+                print(f"[OK] Hotkey '{self.hotkey}' active on macOS")
+                print(f"[OK] Quit hotkey '{self.quit_hotkey}' active on macOS")
+            else:
+                print(f"[OK] Hotkey '{self.hotkey}' active with suppress=True")
+                print(f"[OK] Quit hotkey '{self.quit_hotkey}' active with suppress=True")
             while not self._stop_event.is_set():
-                if self._is_pressed and not keyboard.is_pressed(self.hotkey):
+                if sys.platform != "darwin" and self._is_pressed and not keyboard.is_pressed(self.hotkey):
                     self._on_release()
                 time.sleep(0.1)
         except Exception as exc:
-            print(f"[ERROR] Failed to register suppressing hotkey: {exc}")
-            print(f"[INFO] Run start.bat as Administrator if {self.hotkey} is not blocked on Windows 11.")
+            if sys.platform == "darwin":
+                print(f"[ERROR] Failed to register macOS hotkey listener: {exc}")
+                print("[INFO] Grant Accessibility permissions to the terminal/app on macOS.")
+            else:
+                print(f"[ERROR] Failed to register suppressing hotkey: {exc}")
+                print(f"[INFO] Run start.bat as Administrator if {self.hotkey} is not blocked on Windows 11.")
         finally:
             self._unregister_hotkey()
             self._is_pressed = False
@@ -166,10 +229,11 @@ class HotkeyManager:
         print("[INFO] Stopping hotkey listener...")
         self._stop_event.set()
         self._unregister_hotkey()
-        try:
-            keyboard.unhook_all_hotkeys()
-        except Exception:
-            pass
+        if sys.platform != "darwin":
+            try:
+                keyboard.unhook_all_hotkeys()
+            except Exception:
+                pass
 
         if self._listener_thread and self._listener_thread.is_alive():
             self._listener_thread.join(timeout=2.0)
@@ -185,7 +249,11 @@ class HotkeyManager:
             return
         self._is_paused = True
         self._is_pressed = False
-        self._unregister_hotkey()
+        if sys.platform == "darwin":
+            self._pressed_keys.clear()
+            self._quit_fired = False
+        else:
+            self._unregister_hotkey()
         print("[INFO] Hotkey paused")
 
     def resume_hotkey(self):
@@ -193,7 +261,7 @@ class HotkeyManager:
         if not self._is_paused:
             return
         self._is_paused = False
-        if self._is_listening:
+        if self._is_listening and sys.platform != "darwin":
             self._register_hotkey()
         print("[INFO] Hotkey resumed")
 
@@ -202,6 +270,7 @@ class HotkeyManager:
             return True
 
         self.hotkey = new_hotkey
+        self._hotkey_tokens = self._parse_hotkey(new_hotkey)
         print(f"[INFO] Hotkey updated to: {new_hotkey}")
         for warning in self._check_conflicts():
             print(f"[WARNING] {warning}")
@@ -215,6 +284,7 @@ class HotkeyManager:
             return True
 
         self.quit_hotkey = new_hotkey
+        self._quit_hotkey_tokens = self._parse_hotkey(new_hotkey)
         print(f"[INFO] Quit hotkey updated to: {new_hotkey}")
         for warning in self._check_conflicts(self.quit_hotkey):
             print(f"[WARNING] Quit {warning}")
@@ -228,6 +298,77 @@ class HotkeyManager:
 
     def is_pressed(self):
         return self._is_pressed
+
+    def _parse_hotkey(self, hotkey_value):
+        aliases = {
+            "control": "ctrl",
+            "win": "windows",
+            "cmd": "windows",
+            "command": "windows",
+            "meta": "windows",
+            "option": "alt",
+            "return": "enter",
+        }
+        tokens = []
+        for part in hotkey_value.replace("-", "+").split("+"):
+            token = part.strip().lower()
+            if not token:
+                continue
+            tokens.append(aliases.get(token, token))
+        return set(tokens)
+
+    def _normalize_pynput_key(self, key):
+        if key in (pynput_keyboard.Key.ctrl, pynput_keyboard.Key.ctrl_l, pynput_keyboard.Key.ctrl_r):
+            return "ctrl"
+        if key in (pynput_keyboard.Key.alt, pynput_keyboard.Key.alt_l, pynput_keyboard.Key.alt_r, pynput_keyboard.Key.alt_gr):
+            return "alt"
+        if key in (pynput_keyboard.Key.shift, pynput_keyboard.Key.shift_l, pynput_keyboard.Key.shift_r):
+            return "shift"
+        if key in (
+            pynput_keyboard.Key.cmd,
+            getattr(pynput_keyboard.Key, "cmd_l", None),
+            getattr(pynput_keyboard.Key, "cmd_r", None),
+        ):
+            return "windows"
+        if key == pynput_keyboard.Key.space:
+            return "space"
+        if key == pynput_keyboard.Key.enter:
+            return "enter"
+        if key == pynput_keyboard.Key.tab:
+            return "tab"
+        if key == pynput_keyboard.Key.esc:
+            return "esc"
+        if hasattr(key, "char") and key.char:
+            return key.char.lower()
+        return None
+
+    def _on_native_press(self, key):
+        if self._is_paused:
+            return
+        token = self._normalize_pynput_key(key)
+        if not token:
+            return
+        self._pressed_keys.add(token)
+
+        if self._quit_hotkey_tokens and self._quit_hotkey_tokens.issubset(self._pressed_keys):
+            if not self._quit_fired:
+                self._quit_fired = True
+                self._on_quit()
+            return
+
+        if self._hotkey_tokens and self._hotkey_tokens.issubset(self._pressed_keys) and not self._is_pressed:
+            self._on_press()
+
+    def _on_native_release(self, key):
+        token = self._normalize_pynput_key(key)
+        if token:
+            self._pressed_keys.discard(token)
+
+        if self._quit_fired and not self._quit_hotkey_tokens.issubset(self._pressed_keys):
+            self._quit_fired = False
+
+        if self._is_pressed and not self._hotkey_tokens.issubset(self._pressed_keys):
+            self._on_release()
 
 
 if __name__ == "__main__":
