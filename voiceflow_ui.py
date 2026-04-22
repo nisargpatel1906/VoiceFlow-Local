@@ -622,11 +622,18 @@ class VoiceFlowWindow(QWidget):
         self.mic = MicButton()
         self.waveform = WaveformWidget()
         self.live_box = LiveTextBox()
+        self.session_hint = QLabel()
+        self.session_hint.setFont(app_font(9, QFont.Weight.Medium))
+        self.session_hint.setStyleSheet("color: #6e675c; background: transparent; border: none;")
+        self.session_hint.setWordWrap(True)
+        self.session_hint.setText("Hold the hotkey, speak naturally, and VoiceFlow pastes the final text into your active app.")
         self.history_list = QVBoxLayout()
         self.history_list.setContentsMargins(0, 0, 0, 0)
         self.history_list.setSpacing(7)
         self.history_list.addStretch()
         self.greeting_row = None
+        self.stats_value_labels: Dict[str, QLabel] = {}
+        self.stats_caption_labels: Dict[str, QLabel] = {}
         self.live_box.copy_requested.connect(self.copy_requested)
         self._build()
 
@@ -651,50 +658,98 @@ class VoiceFlowWindow(QWidget):
         greeting.setStyleSheet("color: #151515; background: transparent;")
         greeting_row.addWidget(greeting)
         self._populate_greeting_hotkey()
-        greeting_row.addStretch()
         main.addLayout(greeting_row)
 
         top_cards = QHBoxLayout()
         top_cards.setSpacing(18)
         control_card = QFrame()
-        control_card.setFixedHeight(220)
+        control_card.setFixedHeight(274)
         control_card.setStyleSheet("QFrame { background: #ffffff; border: 1px solid #e8e2d8; border-radius: 16px; }")
         control_layout = QHBoxLayout(control_card)
-        control_layout.setContentsMargins(24, 20, 24, 20)
-        control_layout.setSpacing(20)
+        control_layout.setContentsMargins(28, 24, 28, 24)
+        control_layout.setSpacing(28)
         mic_area = QVBoxLayout()
+        mic_area.setSpacing(12)
+        header_row = QHBoxLayout()
+        header_row.setSpacing(12)
         title = QLabel("Dictation control")
         title.setFont(app_font(20, QFont.Weight.Bold))
-        title.setStyleSheet("color: #191919; background: transparent;")
-        subtitle = QLabel("Hold the hotkey, speak naturally, and VoiceFlow pastes the final text into your active app.")
-        subtitle.setWordWrap(True)
-        subtitle.setFont(app_font(10))
-        subtitle.setStyleSheet("color: #65615a; background: transparent;")
-        mic_area.addWidget(title)
-        mic_area.addWidget(subtitle)
-        mic_area.addStretch()
+        title.setStyleSheet("color: #191919; background: transparent; border: none;")
+        header_row.addWidget(title)
+        header_row.addStretch()
+        header_row.addWidget(self.status)
+        mic_area.addLayout(header_row)
+
+        utility_row = QHBoxLayout()
+        utility_row.setSpacing(8)
+        hotkey_label = QLabel("HOTKEY")
+        hotkey_label.setFont(app_font(8, QFont.Weight.Bold))
+        hotkey_label.setStyleSheet("color: #7f7a72; background: #f5f1e8; border: 1px solid #e7dece; border-radius: 10px; padding: 4px 8px;")
+        utility_row.addWidget(hotkey_label)
+        utility_row.addWidget(self.hotkey)
+        utility_row.addStretch()
+        mic_area.addLayout(utility_row)
+        mic_area.addWidget(self.session_hint)
         mic_area.addWidget(self.live_box)
         self.live_box.editor.setStyleSheet("QTextEdit { background: #fbfaf7; color: #222222; border: 1px solid #ece5d8; border-radius: 8px; padding: 12px; }")
         self.live_box.char_count.setStyleSheet("color: #78736c; background: transparent;")
         self.live_box.copy_button.setStyleSheet("border: none; color: #6c4a1d; padding: 0; background: transparent;")
+        self.live_box.editor.setFixedHeight(98)
         control_layout.addLayout(mic_area, 1)
         meter = QVBoxLayout()
-        meter.addStretch()
-        meter.addWidget(self.mic, alignment=Qt.AlignmentFlag.AlignCenter)
-        meter.addWidget(self.waveform, alignment=Qt.AlignmentFlag.AlignCenter)
-        meter.addStretch()
+        meter.setSpacing(12)
+        meter.addStretch(1)
+        mic_shell = QFrame()
+        mic_shell.setFixedSize(164, 148)
+        mic_shell.setStyleSheet("QFrame { background: #f7f3eb; border: 1px solid #ece4d7; border-radius: 24px; }")
+        mic_shell_layout = QVBoxLayout(mic_shell)
+        mic_shell_layout.setContentsMargins(18, 18, 18, 18)
+        mic_shell_layout.addWidget(self.mic, alignment=Qt.AlignmentFlag.AlignCenter)
+        meter.addWidget(mic_shell, alignment=Qt.AlignmentFlag.AlignCenter)
+        wave_shell = QFrame()
+        wave_shell.setFixedSize(128, 64)
+        wave_shell.setStyleSheet("QFrame { background: #f7f3eb; border: 1px solid #ece4d7; border-radius: 16px; }")
+        wave_shell_layout = QVBoxLayout(wave_shell)
+        wave_shell_layout.setContentsMargins(14, 8, 14, 8)
+        wave_shell_layout.addWidget(self.waveform, alignment=Qt.AlignmentFlag.AlignCenter)
+        meter.addWidget(wave_shell, alignment=Qt.AlignmentFlag.AlignCenter)
+        meter.addStretch(1)
         control_layout.addLayout(meter)
         top_cards.addWidget(control_card, 1)
 
         stats_card = QFrame()
-        stats_card.setFixedSize(220, 220)
+        stats_card.setFixedSize(248, 274)
         stats_card.setStyleSheet("QFrame { background: #f0ede5; border: 1px solid #e4ddd0; border-radius: 16px; }")
         stats_layout = QVBoxLayout(stats_card)
-        stats_layout.setContentsMargins(24, 20, 24, 20)
-        for value, label in (("15", "total words"), ("85", "wpm today"), ("1", "day streak")):
-            stat = QLabel(f"<span style='font-size:28px; color:#191919;'>{value}</span> <span style='font-size:13px; color:#333333;'>{label}</span>")
-            stat.setStyleSheet("background: transparent;")
-            stats_layout.addWidget(stat)
+        stats_layout.setContentsMargins(22, 22, 22, 22)
+        stats_layout.setSpacing(10)
+        stats_title = QLabel("Session snapshot")
+        stats_title.setFont(app_font(11, QFont.Weight.Bold))
+        stats_title.setStyleSheet("color: #6f675d; background: transparent; border: none;")
+        stats_layout.addWidget(stats_title)
+        stats_grid = QGridLayout()
+        stats_grid.setContentsMargins(0, 4, 0, 0)
+        stats_grid.setHorizontalSpacing(10)
+        stats_grid.setVerticalSpacing(10)
+        for index, (key, label) in enumerate((("dictations", "total dictations"), ("latency", "avg latency"), ("words", "total words"), ("streak", "day streak"))):
+            stat_row = QFrame()
+            stat_row.setStyleSheet("QFrame { background: #f7f3eb; border: 1px solid #e4ddd0; border-radius: 14px; }")
+            stat_row_layout = QVBoxLayout(stat_row)
+            stat_row_layout.setContentsMargins(14, 12, 14, 12)
+            stat_row_layout.setSpacing(4)
+            value_label = QLabel("--")
+            value_label.setFont(app_font(18, QFont.Weight.DemiBold))
+            value_label.setStyleSheet("color: #171717; background: transparent; border: none;")
+            caption_label = QLabel(label)
+            caption_label.setFont(app_font(8, QFont.Weight.DemiBold))
+            caption_label.setWordWrap(True)
+            caption_label.setStyleSheet("color: #6f675d; background: transparent; border: none;")
+            stat_row_layout.addWidget(value_label)
+            stat_row_layout.addWidget(caption_label)
+            stats_grid.addWidget(stat_row, index // 2, index % 2)
+            self.stats_value_labels[key] = value_label
+            self.stats_caption_labels[key] = caption_label
+        stats_layout.addLayout(stats_grid)
         stats_layout.addStretch()
         top_cards.addWidget(stats_card)
         main.addLayout(top_cards)
@@ -770,6 +825,12 @@ class VoiceFlowWindow(QWidget):
         self.status.set_state(ui_state)
         self.mic.set_state(ui_state)
         self.waveform.set_mode(ui_state)
+        hints = {
+            "idle": "Hold the hotkey, speak naturally, and VoiceFlow pastes the final text into your active app.",
+            "recording": "Listening live. Preview updates while you speak, then the final pass runs when you release.",
+            "processing": "Finalizing the full transcription for higher accuracy before it is pasted.",
+        }
+        self.session_hint.setText(hints.get(state, hints["idle"]))
 
     def set_hotkey_active(self, active: bool):
         self.hotkey.set_active(active)
@@ -821,6 +882,12 @@ class VoiceFlowWindow(QWidget):
             item = self.history_list.takeAt(50)
             if item and item.widget():
                 item.widget().deleteLater()
+        entries = []
+        for index in range(self.history_list.count() - 1):
+            item = self.history_list.itemAt(index)
+            if item and item.widget() and isinstance(item.widget(), HistoryEntry):
+                entries.append(item.widget().entry)
+        self._update_stats(entries)
 
     def set_history(self, entries: List[Dict]):
         while self.history_list.count() > 1:
@@ -832,6 +899,7 @@ class VoiceFlowWindow(QWidget):
             widget = HistoryEntry(entry)
             widget.selected.connect(self.history_selected)
             self.history_list.insertWidget(self.history_list.count() - 1, widget)
+        self._update_stats(newest_first)
 
     def show_near_tray(self, activate: bool = False):
         screen = QApplication.primaryScreen().availableGeometry()
@@ -848,6 +916,42 @@ class VoiceFlowWindow(QWidget):
         if event.type() == QEvent.Type.ActivationChange and self.isVisible() and not self.isActiveWindow() and self.current_state == "idle":
             self.hide()
         super().changeEvent(event)
+
+    def _update_stats(self, entries: List[Dict]):
+        total_dictations = len(entries)
+        total_words = sum(len(str(entry.get("text", "")).split()) for entry in entries)
+        durations = [float(entry.get("duration_sec", 0)) for entry in entries if entry.get("duration_sec")]
+        average_latency = sum(durations) / len(durations) if durations else 0.0
+        streak_days = self._calculate_streak(entries)
+
+        self.stats_value_labels["dictations"].setText(str(total_dictations))
+        self.stats_value_labels["latency"].setText(f"{average_latency:.1f}s" if average_latency else "--")
+        self.stats_value_labels["words"].setText(f"{total_words:,}")
+        self.stats_value_labels["streak"].setText(str(streak_days))
+
+    def _calculate_streak(self, entries: List[Dict]) -> int:
+        if not entries:
+            return 0
+
+        days = set()
+        for entry in entries:
+            date_text = entry.get("date")
+            if not date_text:
+                continue
+            try:
+                days.add(datetime.strptime(date_text, "%Y-%m-%d").date())
+            except ValueError:
+                continue
+
+        if not days:
+            return 0
+
+        streak = 0
+        current_day = max(days)
+        while current_day in days:
+            streak += 1
+            current_day = current_day.fromordinal(current_day.toordinal() - 1)
+        return streak
 
 
 class TrayController:
@@ -888,6 +992,8 @@ class TrayController:
         self.floating.show_center_top()
 
     def notify(self, message: str, duration: int = 3000):
+        if not getattr(config, "SHOW_NOTIFICATIONS", False):
+            return
         self.tray_icon.showMessage("VoiceFlow", message, QSystemTrayIcon.MessageIcon.Information, duration)
 
     def _icon(self, state: str) -> QIcon:

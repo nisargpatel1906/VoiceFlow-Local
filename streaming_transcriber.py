@@ -11,7 +11,9 @@ import os
 import queue
 import sys
 import threading
+import tempfile
 import time
+import wave
 from typing import Callable, Optional
 
 from PyQt6.QtCore import QObject, Qt, pyqtSignal
@@ -104,6 +106,30 @@ class StreamingTranscriber(QObject):
         self.running_transcript = ""
         self.detected_language = None if getattr(self.config, "TRANSLATE_TO_ENGLISH", False) else getattr(self.config, "LANGUAGE", None)
 
+    def transcribe_final_audio(self, audio_bytes: bytes) -> str:
+        if not audio_bytes:
+            return ""
+
+        wav_path = tempfile.mktemp(suffix=".wav")
+        try:
+            self._write_wav(wav_path, audio_bytes)
+            transcribe_kwargs = {
+                "beam_size": getattr(self.config, "BEAM_SIZE", 5),
+                "vad_filter": True,
+            }
+            if getattr(self.config, "TRANSLATE_TO_ENGLISH", False):
+                transcribe_kwargs["task"] = "translate"
+                transcribe_kwargs["language"] = None
+            elif self.detected_language:
+                transcribe_kwargs["language"] = self.detected_language
+            else:
+                transcribe_kwargs["language"] = getattr(self.config, "LANGUAGE", None)
+
+            segments, _ = self.model.transcribe(wav_path, **transcribe_kwargs)
+            return " ".join(segment.text for segment in segments).strip()
+        finally:
+            self._cleanup_helper.cleanup(wav_path)
+
     def _consume_queue(self, chunk_queue: "queue.Queue[Optional[str]]"):
         while True:
             chunk_path = chunk_queue.get()
@@ -193,3 +219,10 @@ class StreamingTranscriber(QObject):
         except Exception as exc:
             print(f"[ERROR] Failed to load streaming Whisper model: {exc}")
             raise
+
+    def _write_wav(self, path: str, audio_bytes: bytes):
+        with wave.open(path, "wb") as wav_file:
+            wav_file.setnchannels(self._cleanup_helper.CHANNELS)
+            wav_file.setsampwidth(self._cleanup_helper.SAMPLE_WIDTH)
+            wav_file.setframerate(self._cleanup_helper.SAMPLE_RATE)
+            wav_file.writeframes(audio_bytes)

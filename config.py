@@ -38,6 +38,6 @@ LOG_FILE = os.path.join(BASE_DIR, 'voiceflow_log.txt')
 
 # Behaviour
 START_WITH_WINDOWS = False
-SHOW_NOTIFICATIONS = True
+SHOW_NOTIFICATIONS = False
 SILENCE_THRESHOLD_SEC = 3
 DEBUG_MODE = False

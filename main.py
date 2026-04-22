@@ -7,6 +7,7 @@ VoiceFlow Local - Windows dictation app.
 from __future__ import annotations
 
 import argparse
+import ctypes
 import importlib
 import json
 import logging
@@ -18,6 +19,9 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List
+
+if sys.platform == "win32":
+    from ctypes import wintypes
 
 # We MUST import torch / faster_whisper before PyQt6 or we encounter a silent failure
 # down the line when starting a streaming dictation thread with CUDA enabled.
@@ -115,6 +119,8 @@ class JsonlHistory:
 class VoiceFlowApp(QObject):
     hotkey_pressed = pyqtSignal()
     hotkey_released = pyqtSignal()
+    final_audio_ready = pyqtSignal(str, float)
+    final_audio_failed = pyqtSignal(str)
 
     def __init__(self, debug_mode: bool = False):
         super().__init__()
@@ -138,6 +144,9 @@ class VoiceFlowApp(QObject):
         self.recording_started_at = 0.0
         self.pending_final_audio: bytes | None = None
         self.pending_final_duration = 0.0
+        self._sound_path = Path(__file__).resolve().with_name("sound.mp3")
+        self._sound_lock = threading.Lock()
+        self._mci_alias = "voiceflow_sound"
 
         self.window.set_history(self.history.entries)
         self.window.copy_requested.connect(self._copy_text)
@@ -149,6 +158,8 @@ class VoiceFlowApp(QObject):
 
         self.hotkey_pressed.connect(self._start_recording)
         self.hotkey_released.connect(self._stop_recording)
+        self.final_audio_ready.connect(self._on_final_text)
+        self.final_audio_failed.connect(self._on_worker_error)
         self.hotkey = HotkeyManager(
             on_press_callback=lambda: self.hotkey_pressed.emit(),
             on_release_callback=lambda: self.hotkey_released.emit(),
@@ -164,6 +175,7 @@ class VoiceFlowApp(QObject):
         self.window.set_state("idle")
         self.tray.set_state("idle")
         self.tray.notify(f"Ready. Hold {config.HOTKEY} to dictate")
+        self._play_app_sound()
         return self.qt_app.exec()
 
     @pyqtSlot()
@@ -226,16 +238,14 @@ class VoiceFlowApp(QObject):
             self._on_worker_error("No audio captured")
             self._reset_idle()
             return
+        def _worker():
+            try:
+                text = self.stream_transcriber.transcribe_final_audio(audio_bytes)
+                self.final_audio_ready.emit(text, duration_sec)
+            except Exception as exc:
+                self.final_audio_failed.emit(f"Final transcription error: {exc}")
 
-        self.transcriber_thread = StreamingWhisperThread()
-        self.transcriber_thread.partial_ready.connect(self._on_partial_text)
-        self.transcriber_thread.final_ready.connect(self._on_final_text)
-        self.transcriber_thread.error.connect(self._on_worker_error)
-        transcriber_thread = self.transcriber_thread
-        self.transcriber_thread.finished.connect(transcriber_thread.deleteLater)
-        self.transcriber_thread.finished.connect(lambda: self._clear_transcriber_thread(transcriber_thread))
-        self.transcriber_thread.start()
-        self.transcriber_thread.submit_audio(audio_bytes, duration_sec, final=True)
+        threading.Thread(target=_worker, daemon=True, name="VoiceFlowFinalTranscribe").start()
 
     @pyqtSlot(str)
     def _on_partial_text(self, text: str):
@@ -302,8 +312,43 @@ class VoiceFlowApp(QObject):
             self.window.add_history_entry(entry)
             self._inject_text_async(clean_text)
             self.tray.notify(clean_text[:60] + ("..." if len(clean_text) > 60 else ""))
+            self._play_app_sound()
 
         self._reset_idle()
+
+    def _play_app_sound(self):
+        def _worker():
+            try:
+                if sys.platform == "win32":
+                    self._play_windows_mp3()
+                else:
+                    QApplication.beep()
+            except Exception as exc:
+                self.logger.debug(f"App sound failed: {exc}")
+
+        threading.Thread(target=_worker, daemon=True, name="VoiceFlowAppSound").start()
+
+    def _play_windows_mp3(self):
+        if not self._sound_path.exists():
+            return
+
+        mci_send_string = ctypes.windll.winmm.mciSendStringW
+        mci_send_string.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.UINT, wintypes.HANDLE]
+        mci_send_string.restype = wintypes.UINT
+
+        def _send(command: str):
+            error_code = mci_send_string(command, None, 0, None)
+            if error_code:
+                raise RuntimeError(f"MCI command failed ({error_code}): {command}")
+
+        with self._sound_lock:
+            try:
+                mci_send_string(f"close {self._mci_alias}", None, 0, None)
+            except Exception:
+                pass
+            sound_path = str(self._sound_path).replace('"', '""')
+            _send(f'open "{sound_path}" type mpegvideo alias {self._mci_alias}')
+            _send(f"play {self._mci_alias} from 0")
 
     def get_streaming_callbacks(self):
         return (

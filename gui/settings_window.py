@@ -68,7 +68,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "AUTO_SAVE": True,
     "LOG_FORMAT": "JSON lines",
     "START_WITH_WINDOWS": False,
-    "SHOW_NOTIFICATIONS": True,
+    "SHOW_NOTIFICATIONS": False,
     "SILENCE_THRESHOLD_SEC": 3,
     "DEBUG_MODE": False,
 }
