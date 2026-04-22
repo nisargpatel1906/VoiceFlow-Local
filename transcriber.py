@@ -126,12 +126,17 @@ class WhisperTranscriber:
         start = time.time()
 
         # Transcribe with optimized settings
-        segments, _ = self.model.transcribe(
-            audio_file_path,
-            language=config.LANGUAGE,
-            beam_size=getattr(config, 'BEAM_SIZE', 5),  # Better accuracy
-            vad_filter=True,    # Skip silence automatically
-        )
+        transcribe_kwargs = {
+            'beam_size': getattr(config, 'BEAM_SIZE', 5),
+            'vad_filter': True,
+        }
+        if getattr(config, 'TRANSLATE_TO_ENGLISH', False):
+            transcribe_kwargs['task'] = 'translate'
+            transcribe_kwargs['language'] = None
+        else:
+            transcribe_kwargs['language'] = config.LANGUAGE
+
+        segments, _ = self.model.transcribe(audio_file_path, **transcribe_kwargs)
 
         # Join all segments into one string
         text = ' '.join(segment.text for segment in segments)

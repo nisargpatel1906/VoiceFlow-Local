@@ -43,7 +43,7 @@ class StreamingTranscriber(QObject):
         self.beam_size = 3
         self.vad_filter = True
         self.running_transcript = ""
-        self.detected_language = getattr(self.config, "LANGUAGE", None)
+        self.detected_language = None if getattr(self.config, "TRANSLATE_TO_ENGLISH", False) else getattr(self.config, "LANGUAGE", None)
         self._model_loaded = False
         self._consumer_thread: Optional[threading.Thread] = None
         self._cleanup_helper = StreamingRecorder()
@@ -78,6 +78,8 @@ class StreamingTranscriber(QObject):
             "condition_on_previous_text": False,
             "without_timestamps": True,
         }
+        if getattr(self.config, "TRANSLATE_TO_ENGLISH", False):
+            transcribe_kwargs["task"] = "translate"
         if self.detected_language:
             transcribe_kwargs["language"] = self.detected_language
 
@@ -100,7 +102,7 @@ class StreamingTranscriber(QObject):
 
     def reset(self):
         self.running_transcript = ""
-        self.detected_language = getattr(self.config, "LANGUAGE", None)
+        self.detected_language = None if getattr(self.config, "TRANSLATE_TO_ENGLISH", False) else getattr(self.config, "LANGUAGE", None)
 
     def _consume_queue(self, chunk_queue: "queue.Queue[Optional[str]]"):
         while True:

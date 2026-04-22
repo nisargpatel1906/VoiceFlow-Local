@@ -56,6 +56,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "COMPUTE_TYPE": "float16",
     "LANGUAGE": "en",
     "LANGUAGE_CHOICE": "english",
+    "TRANSLATE_TO_ENGLISH": False,
     "BEAM_SIZE": 5,
     "PRELOAD_MODEL_ON_START": False,
     "REMOVE_FILLERS": True,
@@ -442,6 +443,9 @@ class SettingsWindow(QWidget):
         self.language = self.combo(["auto detect", "english", "hindi", "hinglish", "gujarati"])
         card.row("language", "auto-detect or fix to one language", self.language)
 
+        self.translate_to_english = Toggle(bool(cfg("TRANSLATE_TO_ENGLISH")))
+        card.row("translate to english", "return English text regardless of the spoken language", self.translate_to_english)
+
         self.beam_size, self.beam_value = self.slider(1, 10)
         card.row("beam size", "higher = more accurate, slower", self._slider_control(self.beam_size, self.beam_value))
         self.content_layout.addWidget(card)
@@ -609,6 +613,7 @@ class SettingsWindow(QWidget):
             "COMPUTE_TYPE": self.compute_type.currentText(),
             "LANGUAGE": LANGUAGE_TO_CODE[language_choice],
             "LANGUAGE_CHOICE": language_choice,
+            "TRANSLATE_TO_ENGLISH": self.translate_to_english.isChecked(),
             "BEAM_SIZE": self.beam_size.value(),
             "PRELOAD_MODEL_ON_START": bool(cfg("PRELOAD_MODEL_ON_START")),
             "REMOVE_FILLERS": self.remove_fillers.isChecked(),
@@ -642,6 +647,7 @@ class SettingsWindow(QWidget):
         self.model_size.setCurrentText(values["MODEL_SIZE"])
         self.compute_type.setCurrentText(values["COMPUTE_TYPE"])
         self.language.setCurrentText(values["LANGUAGE_CHOICE"])
+        self.translate_to_english.setChecked(values["TRANSLATE_TO_ENGLISH"])
         self.beam_size.setValue(values["BEAM_SIZE"])
         self.remove_fillers.setChecked(values["REMOVE_FILLERS"])
         self.filler_words = list(values["FILLER_WORDS"])
@@ -852,6 +858,7 @@ DEVICE = {literal(values["DEVICE"])}
 COMPUTE_TYPE = {literal(values["COMPUTE_TYPE"])}
 LANGUAGE = {literal(values["LANGUAGE"])}
 LANGUAGE_CHOICE = {literal(values["LANGUAGE_CHOICE"])}
+TRANSLATE_TO_ENGLISH = {literal(values["TRANSLATE_TO_ENGLISH"])}
 BEAM_SIZE = {literal(values["BEAM_SIZE"])}
 PRELOAD_MODEL_ON_START = {literal(values["PRELOAD_MODEL_ON_START"])}
 

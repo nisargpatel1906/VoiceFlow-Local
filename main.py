@@ -136,6 +136,8 @@ class VoiceFlowApp(QObject):
         self.stream_transcriber.error_ready.connect(self._on_streaming_error)
         self.chunk_queue: "queue.Queue[str | None]" = queue.Queue(maxsize=3)
         self.recording_started_at = 0.0
+        self.pending_final_audio: bytes | None = None
+        self.pending_final_duration = 0.0
 
         self.window.set_history(self.history.entries)
         self.window.copy_requested.connect(self._copy_text)
@@ -173,6 +175,8 @@ class VoiceFlowApp(QObject):
         self.is_recording = True
         self.is_processing = False
         self.recording_started_at = time.time()
+        self.pending_final_audio = None
+        self.pending_final_duration = 0.0
         self.chunk_queue = queue.Queue(maxsize=3)
         self.stream_transcriber.reset()
         self.window.update_live_text("")
@@ -206,6 +210,8 @@ class VoiceFlowApp(QObject):
         self.window.set_state("processing")
         self.tray.set_state("processing")
         self.stream_recorder.stop()
+        self.pending_final_audio = self.stream_recorder.get_rolling_buffer()
+        self.pending_final_duration = max(0.0, time.time() - self.recording_started_at) if self.recording_started_at else 0.0
 
     @pyqtSlot(bytes, float)
     def _submit_partial_audio(self, audio_bytes: bytes, duration_sec: float):
@@ -241,6 +247,14 @@ class VoiceFlowApp(QObject):
 
     @pyqtSlot(str)
     def _on_final_received(self, raw_text: str):
+        if self.pending_final_audio:
+            final_audio = self.pending_final_audio
+            duration_sec = self.pending_final_duration
+            self.pending_final_audio = None
+            self.pending_final_duration = 0.0
+            self._submit_final_audio(final_audio, duration_sec)
+            return
+
         duration_sec = max(0.0, time.time() - self.recording_started_at) if self.recording_started_at else 0.0
         self._finalize_transcript(raw_text, duration_sec)
 
@@ -263,6 +277,8 @@ class VoiceFlowApp(QObject):
     def _reset_idle(self):
         self.is_recording = False
         self.is_processing = False
+        self.pending_final_audio = None
+        self.pending_final_duration = 0.0
         self.window.set_hotkey_active(False)
         self.window.hide_live_badge()
         self.window.set_state("idle")
