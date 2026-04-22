@@ -4,6 +4,8 @@ VoiceFlow Local - compact tray popup UI.
 
 from __future__ import annotations
 
+import ctypes
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
@@ -13,6 +15,13 @@ from PyQt6.QtCore import QByteArray, QEasingCurve, QEvent, QPoint, QPropertyAnim
 from PyQt6.QtGui import QColor, QCursor, QFont, QIcon, QPainter, QPen, QPixmap
 from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtWidgets import QApplication, QFrame, QGraphicsDropShadowEffect, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSystemTrayIcon, QTextEdit, QToolButton, QVBoxLayout, QWidget
+
+if sys.platform == "win32":
+    HWND_TOPMOST = -1
+    SWP_NOSIZE = 0x0001
+    SWP_NOACTIVATE = 0x0010
+    SWP_NOOWNERZORDER = 0x0200
+    SWP_NOSENDCHANGING = 0x0400
 
 
 BG = "#0d0d12"
@@ -275,6 +284,7 @@ class FloatingBar(QWidget):
         super().showEvent(event)
         self._move_to_anchor()
         self._position_lock.start()
+        QTimer.singleShot(0, self._move_to_anchor)
         if not self._did_initial_reanchor:
             self._did_initial_reanchor = True
             self._schedule_initial_reanchor()
@@ -327,11 +337,11 @@ class FloatingBar(QWidget):
 
     def _apply_size(self):
         if self.state == "idle" and self.hovered:
-            self.setFixedSize(330, 96)
+            self.setFixedSize(324, 90)
         elif self.state == "idle":
-            self.setFixedSize(120, 32)
+            self.setFixedSize(116, 30)
         else:
-            self.setFixedSize(132, 44)
+            self.setFixedSize(128, 42)
 
         if self._anchor_center_x is not None and self._anchor_bottom is not None:
             self._move_to_anchor()
@@ -341,27 +351,42 @@ class FloatingBar(QWidget):
         self._anchor_bottom = screen.bottom()
 
     def _move_to_anchor(self):
-        if self._anchor_center_x is None or self._anchor_bottom is None:
+        target = self._anchor_point()
+        if target is None:
             return
-        x = self._anchor_center_x - self.width() // 2
-        y = self._anchor_bottom - self.height() + 1
-        target = QPoint(x, y)
         if self.pos() == target:
             return
         self._repositioning = True
         try:
+            if sys.platform == "win32" and int(self.winId()):
+                ctypes.windll.user32.SetWindowPos(
+                    int(self.winId()),
+                    HWND_TOPMOST,
+                    target.x(),
+                    target.y(),
+                    0,
+                    0,
+                    SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOSENDCHANGING,
+                )
             self.move(target)
         finally:
             self._repositioning = False
 
     def _schedule_initial_reanchor(self):
-        for delay in (0, 120, 260, 420, 700):
+        for delay in (0, 120, 260, 420, 700, 1000, 1500):
             QTimer.singleShot(delay, self._move_to_anchor)
 
     def _enforce_anchor(self):
         if not self.isVisible() or self._anchor_center_x is None or self._anchor_bottom is None:
             return
         self._move_to_anchor()
+
+    def _anchor_point(self) -> Optional[QPoint]:
+        if self._anchor_center_x is None or self._anchor_bottom is None:
+            return None
+        x = self._anchor_center_x - self.width() // 2
+        y = self._anchor_bottom - self.height() + 1
+        return QPoint(x, y)
 
     def paintEvent(self, event):  # noqa: N802
         painter = QPainter(self)
@@ -370,52 +395,52 @@ class FloatingBar(QWidget):
         if self.state == "idle" and not self.hovered:
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QColor(255, 255, 255, 28))
-            painter.drawRoundedRect(QRectF(32, 9, 56, 14), 7, 7)
+            painter.drawRoundedRect(QRectF(31, 8, 54, 13), 6.5, 6.5)
             painter.setBrush(QColor(42, 42, 42, 170))
-            painter.drawRoundedRect(QRectF(38, 12, 44, 8), 4, 4)
+            painter.drawRoundedRect(QRectF(37, 11, 42, 7), 3.5, 3.5)
             painter.setPen(QPen(QColor(255, 255, 255, 62), 1))
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawRoundedRect(QRectF(32, 9, 56, 14), 7, 7)
+            painter.drawRoundedRect(QRectF(31, 8, 54, 13), 6.5, 6.5)
         elif self.state == "idle":
             glass = QColor(10, 10, 12, 184)
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QColor(255, 255, 255, 22))
-            painter.drawRoundedRect(QRectF(4, 0, 322, 64), 29, 29)
+            painter.drawRoundedRect(QRectF(4, 0, 316, 60), 27, 27)
             painter.setBrush(glass)
             painter.setPen(QPen(QColor(255, 255, 255, 34), 1))
-            painter.drawRoundedRect(QRectF(10, 4, 310, 56), 25, 25)
+            painter.drawRoundedRect(QRectF(10, 4, 304, 52), 24, 24)
             painter.setPen(QPen(QColor(255, 255, 255, 20), 1))
-            painter.drawRoundedRect(QRectF(12, 6, 306, 52), 23, 23)
+            painter.drawRoundedRect(QRectF(12, 6, 300, 48), 22, 22)
             painter.setPen(QPen(QColor(255, 255, 255, 128), 1))
             painter.setBrush(QColor(8, 8, 9, 158))
-            painter.drawRoundedRect(QRectF(108, 72, 114, 24), 12, 12)
-            self._draw_dots(painter, 145, 83, QColor(185, 185, 190))
+            painter.drawRoundedRect(QRectF(108, 66, 108, 20), 10, 10)
+            self._draw_dots(painter, 143, 75, QColor(185, 185, 190))
 
             painter.setFont(app_font(10, QFont.Weight.Medium))
             painter.setPen(QColor("#ffffff"))
-            painter.drawText(QRectF(36, 4, 76, 56), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, "Click or hold")
+            painter.drawText(QRectF(32, 2, 78, 54), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, "Click or hold")
             painter.setPen(QColor("#ff9be7"))
             painter.setFont(app_font(10, QFont.Weight.Bold))
-            painter.drawText(QRectF(114, 4, 78, 56), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, "Ctrl + Win")
+            painter.drawText(QRectF(112, 2, 76, 54), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, "Ctrl + Win")
             painter.setPen(QColor("#ffffff"))
             painter.setFont(app_font(10, QFont.Weight.Medium))
-            painter.drawText(QRectF(202, 4, 90, 56), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, "to dictate")
+            painter.drawText(QRectF(196, 2, 86, 54), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, "to dictate")
         elif self.state == "recording":
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QColor(255, 255, 255, 22))
-            painter.drawRoundedRect(QRectF(5, 7, 122, 32), 16, 16)
+            painter.drawRoundedRect(QRectF(5, 6, 118, 30), 15, 15)
             painter.setBrush(QColor(18, 10, 11, 172))
             painter.setPen(QPen(QColor(255, 255, 255, 44), 1))
-            painter.drawRoundedRect(QRectF(8, 10, 116, 26), 13, 13)
-            self._draw_wave(painter, x_offset=38, y_center=23)
+            painter.drawRoundedRect(QRectF(8, 8, 112, 26), 13, 13)
+            self._draw_wave(painter, x_offset=36, y_center=21)
         elif self.state == "processing":
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QColor(255, 255, 255, 22))
-            painter.drawRoundedRect(QRectF(5, 7, 122, 32), 16, 16)
+            painter.drawRoundedRect(QRectF(5, 6, 118, 30), 15, 15)
             painter.setBrush(QColor(12, 10, 5, 172))
             painter.setPen(QPen(QColor(255, 255, 255, 44), 1))
-            painter.drawRoundedRect(QRectF(8, 10, 116, 26), 13, 13)
-            self._draw_dots(painter, 48, 22, QColor(PROCESSING))
+            painter.drawRoundedRect(QRectF(8, 8, 112, 26), 13, 13)
+            self._draw_dots(painter, 46, 20, QColor(PROCESSING))
         else:
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QColor("#050506"))
@@ -792,11 +817,12 @@ class TrayController:
         self.floating.set_level(level)
 
     def show_full_window(self):
-        self.floating.hide()
         self.window.show_near_tray(activate=True)
+        self.floating.show_center_top()
 
-    def show_floating(self):
-        self.window.hide()
+    def show_floating(self, hide_window: bool = True):
+        if hide_window:
+            self.window.hide()
         self.floating.show_center_top()
 
     def notify(self, message: str, duration: int = 3000):

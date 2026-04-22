@@ -155,7 +155,7 @@ class VoiceFlowApp(QObject):
         self.window.update_live_text("")
         self.window.set_hotkey_active(True)
         self.window.set_state("recording")
-        self.tray.show_floating()
+        self.tray.show_floating(hide_window=False)
         self.tray.set_state("recording")
 
         self.audio_thread = AudioCaptureThread()

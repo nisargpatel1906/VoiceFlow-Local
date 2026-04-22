@@ -53,6 +53,8 @@ models/
 temp/
 docx/
 .claude/
+.agents/
+graphify-out
 
 # Logs and History
 *.log
