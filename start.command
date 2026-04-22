@@ -14,5 +14,5 @@ if [ ! -x "$PYTHON_BIN" ]; then
   PYTHON_BIN="$SCRIPT_DIR/venv/bin/python3"
 fi
 
-nohup "$PYTHON_BIN" "$SCRIPT_DIR/main.py" >> "$SCRIPT_DIR/voiceflow_start.log" 2>&1 &
+nohup "$PYTHON_BIN" "$SCRIPT_DIR/launcher.py" >> "$SCRIPT_DIR/voiceflow_start.log" 2>&1 &
 exit 0

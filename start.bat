@@ -18,11 +18,11 @@ set KMP_DUPLICATE_LIB_OK=TRUE
 if exist "venv\Scripts\pythonw.exe" (
     powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command ^
         "$env:KMP_DUPLICATE_LIB_OK='TRUE';" ^
-        "Start-Process -FilePath '%CD%\venv\Scripts\pythonw.exe' -ArgumentList 'main.py' -WorkingDirectory '%CD%' -WindowStyle Hidden"
+        "Start-Process -FilePath '%CD%\venv\Scripts\pythonw.exe' -ArgumentList 'launcher.py' -WorkingDirectory '%CD%' -WindowStyle Hidden"
 ) else (
     powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command ^
         "$env:KMP_DUPLICATE_LIB_OK='TRUE';" ^
-        "Start-Process -FilePath '%CD%\venv\Scripts\python.exe' -ArgumentList 'main.py' -WorkingDirectory '%CD%' -WindowStyle Hidden"
+        "Start-Process -FilePath '%CD%\venv\Scripts\python.exe' -ArgumentList 'launcher.py' -WorkingDirectory '%CD%' -WindowStyle Hidden"
 )
 
 exit /b 0
