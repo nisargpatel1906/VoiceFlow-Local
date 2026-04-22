@@ -52,6 +52,75 @@ class TextCleaner:
         self.auto_capitalize_enabled = getattr(config, 'AUTO_CAPITALIZE', True)
         self.voice_commands_enabled = getattr(config, 'ENABLE_VOICE_COMMANDS', True)
 
+    def deduplicate_chunks(self, text: str) -> str:
+        """
+        Remove repeated 1-4 word sequences caused by chunk overlap.
+
+        Only removes the second occurrence when the same sequence repeats
+        within a short local window, which keeps normal repetition intact.
+        """
+        words = text.split()
+        if len(words) < 2:
+            return text.strip()
+
+        index = 0
+        while index < len(words):
+            removed = False
+            max_sequence = min(4, (len(words) - index) // 2 or 1)
+            for sequence_len in range(max_sequence, 0, -1):
+                first_sequence = words[index:index + sequence_len]
+                if len(first_sequence) < sequence_len:
+                    continue
+
+                max_second_start = min(len(words) - sequence_len, index + 8)
+                for second_start in range(index + sequence_len, max_second_start + 1):
+                    if words[second_start:second_start + sequence_len] != first_sequence:
+                        continue
+
+                    if (
+                        sequence_len == 1
+                        and second_start == index + 2
+                        and words[index + 1].lower() == "to"
+                    ):
+                        del words[index + 1:second_start + sequence_len]
+                    else:
+                        del words[second_start:second_start + sequence_len]
+                    removed = True
+                    break
+
+                if removed:
+                    break
+
+            if not removed:
+                index += 1
+
+        return " ".join(words).strip()
+
+    def is_duplicate_of_previous(self, new_chunk: str, previous_transcript: str) -> bool:
+        """
+        Return True when a whole chunk is already present in the recent transcript tail.
+        """
+        new_words = new_chunk.split()
+        if not new_words:
+            return False
+
+        previous_words = previous_transcript.split()
+        if not previous_words:
+            return False
+
+        tail_words = previous_words[-20:]
+        if len(new_words) > len(tail_words):
+            return False
+
+        lowered_new = [word.lower() for word in new_words]
+        lowered_tail = [word.lower() for word in tail_words]
+        window_size = len(lowered_new)
+
+        for start in range(len(lowered_tail) - window_size + 1):
+            if lowered_tail[start:start + window_size] == lowered_new:
+                return True
+        return False
+
     def remove_fillers(self, text):
         """
         Remove filler words from text (word-boundary aware).
@@ -221,7 +290,10 @@ class TextCleaner:
         if not text:
             return ''
 
-        # Step 1: Handle voice commands first (they add punctuation)
+        # Step 1: Remove chunk-boundary duplicates first.
+        text = self.deduplicate_chunks(text)
+
+        # Step 2: Handle voice commands first (they add punctuation)
         if self.voice_commands_enabled:
             text = self.handle_voice_commands(text)
 
@@ -229,14 +301,14 @@ class TextCleaner:
         if text == 'DELETE_LAST':
             return 'DELETE_LAST'
 
-        # Step 2: Fix self-corrections
+        # Step 3: Fix self-corrections
         if self.fix_self_corrections_enabled:
             text = self.fix_self_corrections(text)
 
-        # Step 3: Remove filler words
+        # Step 4: Remove filler words
         text = self.remove_fillers(text)
 
-        # Step 4: Format sentence
+        # Step 5: Format sentence
         if self.auto_capitalize_enabled:
             text = self.format_sentence(text)
         else:
