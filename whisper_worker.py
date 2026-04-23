@@ -28,6 +28,18 @@ def main() -> int:
         if os.environ.get("VOICEFLOW_FORCE_CPU") == "1":
             config.DEVICE = "cpu"
             config.COMPUTE_TYPE = "int8"
+        elif config.DEVICE == "cuda":
+            # Auto-detect: if no CUDA GPU is found, switch to CPU before
+            # loading the model so the user gets a clear message instead of
+            # a cryptic CUDA error deep inside faster-whisper.
+            try:
+                from gpu_detect import best_device
+                if best_device() != "cuda":
+                    print("[INFO] No CUDA GPU detected; switching to CPU mode.", file=sys.stderr)
+                    config.DEVICE = "cpu"
+                    config.COMPUTE_TYPE = "int8"
+            except (ImportError, ModuleNotFoundError, Exception) as _gpu_exc:
+                print(f"[DEBUG] gpu_detect unavailable ({_gpu_exc}); transcriber.py handles fallback.", file=sys.stderr)
 
         from transcriber import WhisperTranscriber
 

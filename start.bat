@@ -13,6 +13,11 @@ if not exist "venv" (
     exit /b 1
 )
 
+REM Detect available GPU hardware and report to the user
+echo Detecting GPU hardware...
+venv\Scripts\python.exe gpu_detect.py
+echo.
+
 REM Launch the main application
 set KMP_DUPLICATE_LIB_OK=TRUE
 if exist "venv\Scripts\pythonw.exe" (
