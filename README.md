@@ -74,20 +74,23 @@ Reason:
 
 ## Install
 
-### Windows install
+### 1. Clone the repository
 
-Use the provided installer:
-
-```bat
-install.bat
+```bash
+git clone https://github.com/nisargpatel1906/VoiceFlow-Local.git
+cd VoiceFlow-Local
 ```
+
+### 2. Install Dependencies
+
+#### Windows install
 
 That script:
 - creates `venv`
 - installs dependencies
 - downloads the default Whisper model
 
-### macOS install
+#### macOS install
 
 There is no separate Mac installer script in the repo yet. Use a normal venv setup:
 
