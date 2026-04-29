@@ -216,11 +216,16 @@ class VoiceFlowApp(QObject):
 
         try:
             on_partial, on_final = self.get_streaming_callbacks()
+            silence_threshold = (
+                getattr(config, "SILENCE_THRESHOLD_SEC", 0)
+                if getattr(config, "TOGGLE_MODE", False)
+                else 0
+            )
             self.stream_transcriber.start(self.chunk_queue, on_partial=on_partial, on_final=on_final)
             self.stream_recorder.start(
                 self.chunk_queue,
                 on_silence_timeout=lambda: self.silence_timeout.emit(),
-                silence_threshold_sec=getattr(config, "SILENCE_THRESHOLD_SEC", 0),
+                silence_threshold_sec=silence_threshold,
             )
         except Exception as exc:
             try:

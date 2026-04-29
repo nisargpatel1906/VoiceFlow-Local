@@ -115,26 +115,33 @@ class StreamingTranscriber(QObject):
         wav_path = tempfile.mktemp(suffix=".wav")
         try:
             self._write_wav(wav_path, audio_bytes)
-            transcribe_kwargs = {
+            base_kwargs = {
                 "beam_size": getattr(self.config, "BEAM_SIZE", 5),
-                "vad_filter": True,
             }
             if getattr(self.config, "TRANSLATE_TO_ENGLISH", False):
-                transcribe_kwargs["task"] = "translate"
-                transcribe_kwargs["language"] = None
+                base_kwargs["task"] = "translate"
+                base_kwargs["language"] = None
             elif self.detected_language:
-                transcribe_kwargs["language"] = self.detected_language
+                base_kwargs["language"] = self.detected_language
             else:
-                transcribe_kwargs["language"] = getattr(self.config, "LANGUAGE", None)
+                base_kwargs["language"] = getattr(self.config, "LANGUAGE", None)
 
-            try:
-                with self._transcribe_lock:
-                    segments, _ = self.model.transcribe(wav_path, **transcribe_kwargs)
-            except ValueError as exc:
-                if "empty sequence" in str(exc).lower():
-                    return ""
-                raise
-            return " ".join(segment.text for segment in segments).strip()
+            for vad_filter in (True, False):
+                transcribe_kwargs = dict(base_kwargs)
+                transcribe_kwargs["vad_filter"] = vad_filter
+                try:
+                    with self._transcribe_lock:
+                        segments, _ = self.model.transcribe(wav_path, **transcribe_kwargs)
+                except ValueError as exc:
+                    if "empty sequence" in str(exc).lower():
+                        continue
+                    raise
+
+                text = " ".join(segment.text for segment in segments).strip()
+                if text:
+                    return text
+
+            return ""
         finally:
             self._cleanup_helper.cleanup(wav_path)
 
