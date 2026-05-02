@@ -117,6 +117,8 @@ class StreamingTranscriber(QObject):
             self._write_wav(wav_path, audio_bytes)
             base_kwargs = {
                 "beam_size": getattr(self.config, "BEAM_SIZE", 5),
+                "condition_on_previous_text": False,
+                "without_timestamps": True,
             }
             if getattr(self.config, "TRANSLATE_TO_ENGLISH", False):
                 base_kwargs["task"] = "translate"

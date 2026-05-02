@@ -133,6 +133,8 @@ class WhisperTranscriber:
         transcribe_kwargs = {
             'beam_size': getattr(config, 'BEAM_SIZE', 5),
             'vad_filter': True,
+            'condition_on_previous_text': False,
+            'without_timestamps': True,
         }
         if getattr(config, 'TRANSLATE_TO_ENGLISH', False):
             transcribe_kwargs['task'] = 'translate'
